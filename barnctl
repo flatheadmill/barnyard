@@ -1,0 +1,129 @@
+#!/bin/bash
+
+[[ $BASH_VERSION =~ ^5\. ]] || abend incorrect_bash_version
+
+function barnctl_parse_arguments() {
+    local usage=$1
+    shift
+
+    declare -a is_short
+    declare -a is_arged
+    declare -a is_long
+    declare -a opt_long
+    declare -a opt_short
+
+    while :
+    do
+        case "$1" in
+            --)
+                shift
+                break
+                ;;
+            *)
+                local regex='([a-zA-Z0-9]?),([^:]*)(:?)'
+                [[ $1 =~ $regex ]] || abend bad_parameter_argument
+                local short=${BASH_REMATCH[1]} long=${BASH_REMATCH[2]} arged_2=${BASH_REMATCH[3]}
+                local arged=1
+                if [[ -n $arged_2 ]]; then
+                    arged=0
+                fi
+                if [[ -n "$long" ]]; then
+                    is_long+=("--${long}")
+                    if [[ $arged -eq 0 ]]; then
+                        is_arged+=("--${long}")
+                        opt_long+=("${long}:")
+                    else
+                        opt_long+=("${long}")
+                    fi
+                else
+                    is_long+=("--")
+                fi
+                if [[ -n "$short" ]]; then
+                    is_short+=("-${short}")
+                    if [[ $arged -eq 0 ]]; then
+                        is_arged+=("-${short}")
+                        opt_short+=("${short}:")
+                    else
+                        opt_short+=("${short}")
+                    fi
+                else
+                    is_short+=("-")
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    local parsed=$(getopt -a -n acrectl -o +"$(printf "%s" "${opt_short[@]}")" --long "$(IFS=,; echo "${opt_long[*]}")" -- "$@")
+    if [[ $? != 0 ]]; then
+        abend usage_$usage
+    fi
+    eval set -- "$parsed"
+
+    while :
+    do
+        case "$1" in
+            --)
+                shift
+                break
+                ;;
+            --help | -h)
+                acrectl_usage $usage
+                exit
+                ;;
+            *)
+                local arged=1 variable
+                if [[ " ${is_arged[@]} " == *" ${1} "* ]]; then
+                    arged=0
+                fi
+                if [[ "${1:0:2}" == "--" ]]; then
+                    variable="o_${1:2:${#1}}"
+                else
+                    local index=0
+                    for (( index=0; index<=${#is_short[@]}; index++ )); do
+                        [[ ${is_short[$index]} == $1 ]] && break
+                    done
+                    if [[ "${is_long[$index]}" != "--" ]]; then
+                        local long=${is_long[$index]}
+                        variable="o_${long:2:${#long}}"
+                    else
+                        variable="o_${1:1:${#1}}"
+                    fi
+                fi
+                local value=
+                shift
+                if [[ $arged == 0 ]]; then
+                    value=$1
+                    shift
+                else
+                    value=0
+                fi
+                eval "$variable=\$value"
+                ;;
+        esac
+    done
+
+    o_argv=()
+    while [[ $# -ne 0 ]]; do
+        o_argv+=("$1")
+        shift
+    done
+}
+
+IFS=$'\n' read -d '' -r -a ACREOPS_COMMANDS < <( \
+    sed -n 's/^function barnctl_command_\(.*\)() {$/\1/p' $0 \
+)
+
+function barnctl_next_command() {
+    local prefix=$1 command=$2
+    shift 2
+    for func in "${ACREOPS_COMMANDS[@]}"; do
+        if [[ "$func" == "$prefix$command" ]]; then
+            "barnctl_command_$func" "$@"
+            break
+        fi
+    done
+}
+
+barnctl_parse_arguments root "a,alpha:" "h,help" -- "$@"
+barnctl_next_command "" "${o_argv[@]}"

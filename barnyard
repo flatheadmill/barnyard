@@ -1,0 +1,135 @@
+#!/bin/bash
+
+SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+
+function barnyard_temporary_directory() {
+    [[ -n "$TMP" ]] && return
+    TMP="$(mktemp -d)"
+    BARNYARD_RM=("$TMP")
+    trap barnyard_cleanup EXIT
+}
+
+function barnyard_cleanup() {
+    for ((i=${#BARNYARD_RM[@]}-1; i>=0; i--)); do
+        local file="${BARNYARD_RM[$i]}"
+        if [[ -e "$file" ]]; then
+            if [[ -d "$file" ]]; then
+                rmdir "$file"
+            else
+                rm "$file"
+            fi
+        fi
+    done
+}
+
+function barnyard_github_go_release_install() {
+    local uri=$1
+
+    local base="${uri##*/}"
+    # TODO A more wicked regex would catch exactly what we can extract.
+    regex='(.*)_v[0-9]+\.[0-9]+'
+    [[ "$base" =~ $regex ]] || abend cannot_determine_program_name
+    local program="${BASH_REMATCH[1]}"
+
+    if [[ ! -e "/usr/local/bin/$program" ]]; then
+        barnyard_temporary_directory
+        local file="$TMP/github-$(date +%s).tar.gz"
+        BARNYARD_RM+=("$file")
+        curl -Ls -o "$file" "$uri"
+        echo "$file" "${base%.*.*}"
+        local tag="${base%.*.*}"
+        echo here
+        tar xf "$file" "$tag/$program" -O | sudo tee "/usr/local/bin/$program" > /dev/null
+        sudo chmod +x "/usr/local/bin/$program"
+    fi
+}
+
+function barnyard_join() {
+  local d=${1-} f=${2-}
+  if shift 2; then
+    printf %s "$f" "${@/#/$d}"
+  fi
+}
+
+function barnyard_read_config() {
+    declare -n __array="$1"
+    local config=$2 regex='^([^=]+)=(.*)$'
+    while read -r line; do
+        [[ "$line" =~ $regex ]] || abend bad_config "$config"
+        local name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
+        __array["$name"]="$value"
+    done < "$config"
+}
+
+function run_modules() {
+    declare -A o_barnyard
+
+    o_barnyard[hostname]=$(hostname)
+    barnyard_read_config o_barnyard /etc/barnyard/config
+
+    echo checkout
+    git -C /var/barnyard/repository checkout -q "${o_barnyard[branch]}"
+    echo pull
+    GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes' \
+        git -C /var/barnyard/repository pull -q origin "$branch"
+
+    local current=()
+    if [[ -e "/var/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
+        local sha1=$(<"/var/barnyard/sha1/${o_barnyard[hostname]}")
+        cat "/var/barnyard/sha1/${o_barnyard[hostname]}"
+        echo "/var/barnyard/sha1/${o_barnyard[hostname]}"
+        echo log current $(<"/var/barnyard/sha1/${o_barnyard[hostname]}") "$sha1"
+        IFS=' ' read -a current <<< "$(git -C /var/barnyard/repository log -n 1 --format='%H %at %GF' "$sha1")"
+    fi
+
+    declare -A when
+    checkout=()
+    if [[ "${#current[@]}" -eq 0 ]]; then
+        while read -r line; do
+            IFS=' ' read -a fields <<< "$line"
+            if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" ]]; then
+                checkout=("${fields[@]}")
+                break
+            fi
+        done < <(git -C /var/barnyard/repository log --format='%H %at %GF')
+    else
+        echo log history
+        while read -r line; do
+            IFS=' ' read -a fields <<< "$line"
+            echo "${fields[@]}"
+            if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" && ${fields[1]} -gt ${current[1]} ]]; then
+                checkout=("${fields[@]}")
+                break
+            fi
+            if [[ "${fields[0]}" == "${current[0]}" ]]; then
+                echo breaking
+                break
+            fi
+        done < <(git -C /var/barnyard/repository log --format='%H %at %GF')
+    fi
+
+    machine="/var/barnyard/repository/machines/${o_barnyard[hostname]}"
+    modules="/var/barnyard/repository/modules"
+
+    while read -r func; do
+        export -f "$func"
+    done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' $0)
+
+    barnyard_temporary_directory
+    BARNYARD_RM+=("$TMP/.run.env")
+    # https://stackoverflow.com/a/21941473
+
+    if [[ "${#checkout[@]}" -ne 0 ]]; then
+        echo checkout sha1
+        git -C /var/barnyard/repository checkout -q "${checkout[0]}"
+        for module in $(ls "$machine"); do
+            o_barnyard[module]="$module"
+            declare -p o_barnyard > "$TMP/.run.env"
+            bash -c ". $TMP/.run.env; . $SCRIPT_DIR/run"
+        done
+        mkdir -p "/var/barnyard/sha1"
+        # echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
+    fi
+}
+
+run_modules
