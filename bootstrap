@@ -1,5 +1,0 @@
-#!/bin/bash
-
-function install_ssh_key() {
-    local ssh_key=$(<dev/stdin})
-}

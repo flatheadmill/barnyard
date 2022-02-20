@@ -133,3 +133,85 @@ function run_modules() {
 }
 
 run_modules
+
+exit
+
+___ barnyard_run ___
+
+function barnyard_apt_install() {
+    if [[ ${ACREOPS_ENV[apt_update]} -ne 0 ]]; then
+        apt-get -qq update
+        ACREOPS_ENV[apt_update]=0
+    fi
+    DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Use-Pty=0 install -qq "$@" > /dev/null
+    while [[ $# -ne 0 ]]; do
+        local package=$1
+        shift
+        local parts=$(dpkg-query -W "$package" | awk '{ print $1 " " $2 }')
+        IFS=' ' read -r -a array <<< "$parts"
+        log info method=apt_install package="${array[0]}" version="${array[1]}"
+    done
+}
+
+function baryard_apt_source() {
+    local source=$1 file=$2
+    shift 2
+    ACREOPS_ENV[apt_update]=1
+    echo "$source" > "$file"
+}
+
+function baryard_apt_key() {
+    local uri=$1
+    shift
+    curl -s "$uri" | apt-key add - > /dev/null 2>&1
+}
+
+function abend() {
+    local code=$1
+    shift
+    jo hostname="$HOSTNAME" level=error method=error when="$(date --iso-8601=seconds)" file=${BASH_SOURCE[1]##*/} line=${BASH_LINENO[0]} code="$code"
+    exit 1
+}
+
+function log() {
+    local level=$1
+    shift
+    jo hostname="$HOSTNAME" level="$level" when="$(date --iso-8601=seconds)" file=${BASH_SOURCE[1]##*/} line=${BASH_LINENO[0]} "$@"
+}
+
+function check_dependencies() {
+    true
+}
+
+function run() {
+    if [[ -e "/var/barnyard/applied/${o_barnyard[module]}" ]]; then
+        echo alredy applied "${o_barnyard[module]}"
+        return
+    else
+        echo applying "${o_barnyard[module]}"
+    fi
+
+    while read -r func; do
+        export -f "$func"
+    done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' "${BASH_SOURCE[${#BASH_SOURCE[@]} - 1]}")
+
+    export -f log abend
+
+    declare -A o_module
+    barnyard_read_config o_module "/var/barnyard/repository/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
+
+    mkdir -p /var/barnyard/applied
+
+    if [[ -n "${o_module[dependencies]}" ]]; then
+        for depdendency in "${o_module[dependencies]}"; do
+            echo $depdendency
+        done
+    fi
+
+    . "/var/barnyard/repository/modules/${o_barnyard[module]}/apply"
+    if [[ $? -eq 0 ]]; then
+        git -C /var/barnyard/repository log -n 1 --format='%H %at %GF' > "/var/barnyard/applied/${o_barnyard[module]}"
+    fi
+}
+
+run

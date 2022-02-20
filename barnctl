@@ -1,6 +1,75 @@
 #!/bin/bash
 
-[[ $BASH_VERSION =~ ^5\. ]] || abend incorrect_bash_version
+case "$OSTYPE" in
+    linux-gnu )
+        os=ubuntu
+        ;;
+    darwin* )
+        os=osx
+        export PATH=/usr/local/opt/gnu-getopt/bin:$PATH
+        ;;
+esac
+
+SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+
+function barnctl_command_bootstrap() {
+    local o_help o_gpg o_github o_repository o_branch
+    barnctl_parse_arguments bootstrap \
+        "h,help" \
+        "g,gpg:" "G,github:" \
+        "b,branch:" "r,repository:" \
+        -- "$@"
+
+    local server=${o_argv[0]}
+
+    local gpg_key=$(<"$o_gpg")
+
+    local fingerprint=$( \
+        echo "$gpg_key" | \
+            gpg --with-colons --import-options show-only --import --fingerprint | \
+            awk -F: '/^fpr/ { print $10; exit }' \
+    )
+
+    function _compile_script() {
+        echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
+        cat "${SCRIPT_DIR}/barnyard"
+        echo 'EOF'
+        echo '))'
+        echo 'GITHUB_KEY=$(< <(cat <<'"'"EOF"'"
+        cat "$o_github"
+        echo 'EOF'
+        echo '))'
+        echo ''
+        cat "${SCRIPT_DIR}/bootstrap.bash"
+    }
+
+    # https://unix.stackexchange.com/a/414640
+    _compile_script | ssh "$server" bash -s "$(printf " %q" "$o_repository" "$o_branch" "$gpg_key" "$fingerprint")"
+}
+
+function barnctl_command_prepare() {
+    barnctl_parse_arguments bootstrap \
+        "h,help" \
+        -- "$@"
+    local server=${o_argv[0]}
+    cat "${SCRIPT_DIR}/prepare.bash" | ssh "$server" bash
+}
+
+function acrectl_string_resource() {
+    awk '/^# ___ '$1' ___/{flag=1;next}/^# ___/{flag=0}flag' $0 | sed -E 's/^# ?//g'
+}
+
+function abend() {
+    local resource=$1
+    shift
+    local message=$(acrectl_string_resource error_$resource)
+    if [[ -z $message ]]; then
+        echo "error:" "$resource" "$@" 1>&2
+    else
+        printf "error: ${message}\n" "$@" 1>&2
+    fi
+    exit 1
+}
 
 function barnctl_parse_arguments() {
     local usage=$1
@@ -21,7 +90,7 @@ function barnctl_parse_arguments() {
                 ;;
             *)
                 local regex='([a-zA-Z0-9]?),([^:]*)(:?)'
-                [[ $1 =~ $regex ]] || abend bad_parameter_argument
+                [[ $1 =~ $regex ]] || abend bad_parameter_argument "$1"
                 local short=${BASH_REMATCH[1]} long=${BASH_REMATCH[2]} arged_2=${BASH_REMATCH[3]}
                 local arged=1
                 if [[ -n $arged_2 ]]; then
@@ -110,14 +179,14 @@ function barnctl_parse_arguments() {
     done
 }
 
-IFS=$'\n' read -d '' -r -a ACREOPS_COMMANDS < <( \
+IFS=$'\n' read -d '' -r -a BARNCTL_COMMANDS < <( \
     sed -n 's/^function barnctl_command_\(.*\)() {$/\1/p' $0 \
 )
 
 function barnctl_next_command() {
     local prefix=$1 command=$2
     shift 2
-    for func in "${ACREOPS_COMMANDS[@]}"; do
+    for func in "${BARNCTL_COMMANDS[@]}"; do
         if [[ "$func" == "$prefix$command" ]]; then
             "barnctl_command_$func" "$@"
             break
