@@ -59,7 +59,7 @@ umask 077
 mkdir -p /root/.ssh
 umask 022
 
-gpg --quiet --import <(echo "$gpg")
+gpg --quiet --import <(echo "$gpg") 2>/dev/null
 
 known_github="github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg="
 echo "$known_github" > /root/.ssh/known_hosts
