@@ -3,8 +3,8 @@
 cat <<'EOF' | sudo bash
 echo '######### apt update ##########'
 apt-get update && apt-get upgrade -y && apt-get -y autoremove
-echo '######### install gpg, git ##########'
-apt-get install -y gpg git
+echo '######### install gnupg2, git ##########'
+apt-get install -y gnupg2 git
 echo '######### check gpg ##########'
 gpg --version
 echo '######### check git ##########'
