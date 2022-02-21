@@ -46,7 +46,7 @@ function abend() {
     exit 1
 }
 
-cat <<"EOC" > /etc/barnyard/config
+cat <<EOC > /etc/barnyard/config
 repository=$repository
 branch=$branch
 fingerprint=$fingerprint
