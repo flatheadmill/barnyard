@@ -64,7 +64,7 @@ function barnyard_read_config() {
 function run_modules() {
     declare -A o_barnyard
 
-    o_barnyard[hostname]=$(hostname)
+    o_barnyard[hostname]=$(hostname --long)
     barnyard_read_config o_barnyard /etc/barnyard/config
 
     echo checkout
@@ -128,7 +128,7 @@ function run_modules() {
             bash -c ". $TMP/.run.env; . $SCRIPT_DIR/run"
         done
         mkdir -p "/var/barnyard/sha1"
-        # echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
+        echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
     fi
 }
 
