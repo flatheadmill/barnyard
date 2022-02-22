@@ -16,11 +16,15 @@ function barnctl_command_bootstrap() {
     local o_help o_gpg o_github o_repository o_branch
     barnctl_parse_arguments bootstrap \
         "h,help" \
+        "u,user:" \
         "g,gpg:" "G,github:" \
         "b,branch:" "r,repository:" \
         -- "$@"
 
     local server=${o_argv[0]}
+    if [[ -n "$o_user" ]]; then
+        server="$o_user@$server"
+    fi
 
     local gpg_key=$(<"$o_gpg")
 
@@ -48,10 +52,15 @@ function barnctl_command_bootstrap() {
 }
 
 function barnctl_command_prepare() {
+    local o_user
     barnctl_parse_arguments bootstrap \
         "h,help" \
+        "u,user:" \
         -- "$@"
     local server=${o_argv[0]}
+    if [[ -n "$o_user" ]]; then
+        server="$o_user@$server"
+    fi
     cat "${SCRIPT_DIR}/prepare.bash" | ssh "$server" bash
 }
 
