@@ -2,6 +2,10 @@
 
 SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
+function barnyard_bash_resource() {
+    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' $0
+}
+
 function barnyard_temporary_directory() {
     [[ -n "$TMP" ]] && return
     TMP="$(mktemp -d)"
@@ -38,7 +42,6 @@ function barnyard_github_go_release_install() {
         curl -Ls -o "$file" "$uri"
         echo "$file" "${base%.*.*}"
         local tag="${base%.*.*}"
-        echo here
         tar xf "$file" "$tag/$program" -O | sudo tee "/usr/local/bin/$program" > /dev/null
         sudo chmod +x "/usr/local/bin/$program"
     fi
@@ -67,19 +70,23 @@ function run_modules() {
     o_barnyard[hostname]=$(hostname --long)
     barnyard_read_config o_barnyard /etc/barnyard/config
 
-    echo checkout
-    git -C /var/barnyard/repository checkout -q "${o_barnyard[branch]}"
-    echo pull
-    GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes' \
-        git -C /var/barnyard/repository pull -q origin "$branch"
+    if [[ -z "${o_barnyard[barnyard]}" ]]; then
+        o_barnyard[barnyard]=/var/barnyard/repository
+    fi
+
+    o_barnyard[git]="git -C ${o_barnyard[barnyard]}"
+    if [[ -z "${o_barnyard[owner]}" ]]; then
+        o_barnyard[git]="su ${o_barnyard[owner]} ${o_barnyard[git]}"
+    fi
+
+    ${o_barnyard[git]} checkout -q "${o_barnyard[branch]}"
+
+    GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes' ${o_barnyard[git]} pull -q origin "$branch"
 
     local current=()
     if [[ -e "/var/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
         local sha1=$(<"/var/barnyard/sha1/${o_barnyard[hostname]}")
-        cat "/var/barnyard/sha1/${o_barnyard[hostname]}"
-        echo "/var/barnyard/sha1/${o_barnyard[hostname]}"
-        echo log current $(<"/var/barnyard/sha1/${o_barnyard[hostname]}") "$sha1"
-        IFS=' ' read -a current <<< "$(git -C /var/barnyard/repository log -n 1 --format='%H %at %GF' "$sha1")"
+        IFS=' ' read -a current <<< "$(${o_barnyard[git]} log -n 1 --format='%H %at %GF' "$sha1")"
     fi
 
     declare -A when
@@ -91,41 +98,40 @@ function run_modules() {
                 checkout=("${fields[@]}")
                 break
             fi
-        done < <(git -C /var/barnyard/repository log --format='%H %at %GF')
+        done < <(${o_barnyard[git]} log --format='%H %at %GF')
     else
-        echo log history
         while read -r line; do
             IFS=' ' read -a fields <<< "$line"
-            echo "${fields[@]}"
             if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" && ${fields[1]} -gt ${current[1]} ]]; then
                 checkout=("${fields[@]}")
                 break
             fi
             if [[ "${fields[0]}" == "${current[0]}" ]]; then
-                echo breaking
                 break
             fi
-        done < <(git -C /var/barnyard/repository log --format='%H %at %GF')
+        done < <(${o_barnyard[git]} log --format='%H %at %GF')
     fi
 
-    machine="/var/barnyard/repository/machines/${o_barnyard[hostname]}"
-    modules="/var/barnyard/repository/modules"
+    machine="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}"
+    modules="${o_barnyard[barnyard]}/modules"
 
     while read -r func; do
         export -f "$func"
     done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' $0)
 
-    barnyard_temporary_directory
-    BARNYARD_RM+=("$TMP/.run.env")
     # https://stackoverflow.com/a/21941473
 
     if [[ "${#checkout[@]}" -ne 0 ]]; then
-        echo checkout sha1
-        git -C /var/barnyard/repository checkout -q "${checkout[0]}"
+        barnyard_temporary_directory
+        BARNYARD_RM+=("$TMP/.run")
+        BARNYARD_RM+=("$TMP/.run.env")
+        barnyard_bash_resource barnyard_run > "$TMP/.run"
+        ${o_barnyard[git]} checkout -q "${checkout[0]}"
         for module in $(ls "$machine"); do
             o_barnyard[module]="$module"
             declare -p o_barnyard > "$TMP/.run.env"
-            bash -c ". $TMP/.run.env; . $SCRIPT_DIR/run"
+            bash -c ". $TMP/.run.env; . $TMP/.run"
+            [[ $? -ne 0 ]] && exit 1
         done
         mkdir -p "/var/barnyard/sha1"
         echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
@@ -137,34 +143,6 @@ run_modules
 exit
 
 ___ barnyard_run ___
-
-function barnyard_apt_install() {
-    if [[ ${ACREOPS_ENV[apt_update]} -ne 0 ]]; then
-        apt-get -qq update
-        ACREOPS_ENV[apt_update]=0
-    fi
-    DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Use-Pty=0 install -qq "$@" > /dev/null
-    while [[ $# -ne 0 ]]; do
-        local package=$1
-        shift
-        local parts=$(dpkg-query -W "$package" | awk '{ print $1 " " $2 }')
-        IFS=' ' read -r -a array <<< "$parts"
-        log info method=apt_install package="${array[0]}" version="${array[1]}"
-    done
-}
-
-function baryard_apt_source() {
-    local source=$1 file=$2
-    shift 2
-    ACREOPS_ENV[apt_update]=1
-    echo "$source" > "$file"
-}
-
-function baryard_apt_key() {
-    local uri=$1
-    shift
-    curl -s "$uri" | apt-key add - > /dev/null 2>&1
-}
 
 function abend() {
     local code=$1
@@ -179,10 +157,6 @@ function log() {
     jo hostname="$HOSTNAME" level="$level" when="$(date --iso-8601=seconds)" file=${BASH_SOURCE[1]##*/} line=${BASH_LINENO[0]} "$@"
 }
 
-function check_dependencies() {
-    true
-}
-
 function run() {
     if [[ -e "/var/barnyard/applied/${o_barnyard[module]}" ]]; then
         echo alredy applied "${o_barnyard[module]}"
@@ -191,27 +165,26 @@ function run() {
         echo applying "${o_barnyard[module]}"
     fi
 
-    while read -r func; do
-        export -f "$func"
-    done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' "${BASH_SOURCE[${#BASH_SOURCE[@]} - 1]}")
-
-    export -f log abend
+#    export -f log abend
 
     declare -A o_module
-    barnyard_read_config o_module "/var/barnyard/repository/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
+    barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
 
     mkdir -p /var/barnyard/applied
 
     if [[ -n "${o_module[dependencies]}" ]]; then
         for depdendency in "${o_module[dependencies]}"; do
-            echo $depdendency
+            echo "have dependencies $depdendency"
+            exit 1
         done
     fi
 
-    . "/var/barnyard/repository/modules/${o_barnyard[module]}/apply"
-    if [[ $? -eq 0 ]]; then
-        git -C /var/barnyard/repository log -n 1 --format='%H %at %GF' > "/var/barnyard/applied/${o_barnyard[module]}"
-    fi
+    . "${o_barnyard[barnyard]}/modules/${o_barnyard[module]}/apply"
+    [[ $? -ne 0 ]] && exit 1
+
+    ${o_barnyard[git]} log -n 1 --format='%H %at %GF' > "/var/barnyard/applied/${o_barnyard[module]}"
 }
 
 run
+
+___
