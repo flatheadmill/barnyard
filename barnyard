@@ -119,6 +119,9 @@ function run_modules() {
         export -f "$func"
     done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' $0)
 
+    export -f log
+    export -f abend
+
     # https://stackoverflow.com/a/21941473
 
     if [[ "${#checkout[@]}" -ne 0 ]]; then
@@ -138,24 +141,80 @@ function run_modules() {
     fi
 }
 
+function abend() {
+    log priority=3 "$@"
+    exit 1
+}
+
+SALT=a5bbeb04f50fcdee70b0b5976438a8d8
+
+function log() {
+    declare -A PRIORITY
+
+    PRIORITY[panic]=0
+    PRIORITY[alert]=1
+    PRIORITY[crit]=2
+    PRIORITY[err]=3
+    PRIORITY[warn]=4
+    PRIORITY[notice]=5
+    PRIORITY[info]=6
+    PRIORITY[debug]=7
+
+    function _join_by() {
+      local d=${1-} f=${2-}
+      if shift 2; then
+        printf %s "$f" "${@/#/$d}"
+      fi
+    }
+
+    local priority
+    if [[ -z "${PRIORITY["$1"]}" ]]; then
+        priority=info
+    else
+        priority="$1"
+        shift
+    fi
+
+    declare -a journald syslog
+    local name value regex='^([^=]+)=(.*)$'
+    while true; do
+        echo "> $1"
+        if [[ "$1" =~ $regex ]]; then
+            name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
+            journald+=("${name^^}=${value}")
+            syslog+=("${name}=${value}")
+            if [[ "$name" == priority ]]; then
+                priority=$value
+            fi
+            shift
+        else
+            break
+        fi
+    done
+
+    local format="$1" message
+    shift
+    message=$(printf "$format\n" "$@")
+
+    local context=''
+    if [[ ${#syslog[@]} -ne 0 ]]; then
+        context="; $(_join_by ', ' "${syslog[@]}")"
+    fi
+
+    echo "$(date --rfc-3339=s | sed 's/+.*//') barnyard[info]: $message$context"
+
+    local id
+    id=$(echo "$SALT" "$format" | md5sum | cut -d' ' -f1)
+
+    journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=${PRIORITY[$priority]} SYSLOG_FACILITY=1)
+    echo "$(_join_by $'\n' "${journald[@]}")" | logger --journald
+}
+
 run_modules
 
 exit
 
 ___ barnyard_run ___
-
-function abend() {
-    local code=$1
-    shift
-    jo hostname="$HOSTNAME" level=error method=error when="$(date --iso-8601=seconds)" file=${BASH_SOURCE[1]##*/} line=${BASH_LINENO[0]} code="$code"
-    exit 1
-}
-
-function log() {
-    local level=$1
-    shift
-    jo hostname="$HOSTNAME" level="$level" when="$(date --iso-8601=seconds)" file=${BASH_SOURCE[1]##*/} line=${BASH_LINENO[0]} "$@"
-}
 
 function run() {
     if [[ -e "/var/barnyard/applied/${o_barnyard[module]}" ]]; then
@@ -180,8 +239,9 @@ function run() {
     fi
 
     . "${o_barnyard[barnyard]}/modules/${o_barnyard[module]}/apply"
-    [[ $? -ne 0 ]] && exit 1
+    [[ $? -ne 0 ]] && { echo 'bad run'; exit 1; }
 
+    echo "marked applied ${o_barnyard[module]}"
     ${o_barnyard[git]} log -n 1 --format='%H %at %GF' > "/var/barnyard/applied/${o_barnyard[module]}"
 }
 
