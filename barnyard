@@ -75,7 +75,7 @@ function run_modules() {
     fi
 
     o_barnyard[git]="git -C ${o_barnyard[barnyard]}"
-    if [[ -z "${o_barnyard[owner]}" ]]; then
+    if [[ -n "${o_barnyard[owner]}" ]]; then
         o_barnyard[git]="su ${o_barnyard[owner]} ${o_barnyard[git]}"
     fi
 
