@@ -74,14 +74,17 @@ function run_modules() {
         o_barnyard[barnyard]=/var/barnyard/repository
     fi
 
+    export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes'
     o_barnyard[git]="git -C ${o_barnyard[barnyard]}"
     if [[ -n "${o_barnyard[owner]}" ]]; then
-        o_barnyard[git]="su ${o_barnyard[owner]} ${o_barnyard[git]}"
+        export GIT_SSH_COMMAND=ssh
+        export SHELL=/bin/bash
+        o_barnyard[git]="sudo --preserve-env=SSH_AUTH_SOCK -s -u ${o_barnyard[owner]} ${o_barnyard[git]}"
     fi
 
     ${o_barnyard[git]} checkout -q "${o_barnyard[branch]}"
 
-    GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes' ${o_barnyard[git]} pull -q origin "$branch"
+    ${o_barnyard[git]} pull -q origin "$branch"
 
     local current=()
     if [[ -e "/var/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
@@ -124,6 +127,7 @@ function run_modules() {
 
     # https://stackoverflow.com/a/21941473
 
+    echo "Here ${#checkout[@]}"
     if [[ "${#checkout[@]}" -ne 0 ]]; then
         barnyard_temporary_directory
         BARNYARD_RM+=("$TMP/.run")
