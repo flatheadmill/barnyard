@@ -1,29 +1,22 @@
 #!/bin/bash
 
-SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+# TODO Argument parser `f,fingerprint@` would be an array return.
+# TODO Using fingerprint to select from public keys.
+# TODO `--no-signatures`
 
 function barnyard_bash_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' $0
 }
 
-function barnyard_temporary_directory() {
-    [[ -n "$TMP" ]] && return
-    TMP="$(mktemp -d)"
-    BARNYARD_RM=("$TMP")
-    trap barnyard_cleanup EXIT
+function barnyard_cleanup() {
+    rm -rf "$BARNYARD_TEMP"
 }
 
-function barnyard_cleanup() {
-    for ((i=${#BARNYARD_RM[@]}-1; i>=0; i--)); do
-        local file="${BARNYARD_RM[$i]}"
-        if [[ -e "$file" ]]; then
-            if [[ -d "$file" ]]; then
-                rmdir "$file"
-            else
-                rm "$file"
-            fi
-        fi
-    done
+function barnyard_temporary_directory() {
+    [[ -n "$BARNYARD_TEMP" ]] && return
+    BARNYARD_TEMP="$(mktemp -d)"
+    export BARNYARD_TEMP
+    trap barnyard_cleanup EXIT
 }
 
 function barnyard_github_go_release_install() {
@@ -37,7 +30,7 @@ function barnyard_github_go_release_install() {
 
     if [[ ! -e "/usr/local/bin/$program" ]]; then
         barnyard_temporary_directory
-        local file="$TMP/github-$(date +%s).tar.gz"
+        local file="$BARNYARD_TEMP/github-$(date +%s).tar.gz"
         BARNYARD_RM+=("$file")
         curl -Ls -o "$file" "$uri"
         echo "$file" "${base%.*.*}"
@@ -47,11 +40,22 @@ function barnyard_github_go_release_install() {
     fi
 }
 
-function barnyard_join() {
-  local d=${1-} f=${2-}
-  if shift 2; then
-    printf %s "$f" "${@/#/$d}"
-  fi
+function barnyard_join_by() {
+    local d=${1-} f=${2-}
+    if shift 2; then
+        printf %s "$f" "${@/#/$d}"
+    fi
+}
+
+function barnyard_write_config() {
+    declare -n __map="$1"
+    local file="$2"
+    shift 2
+    declare -a fields
+    for key in "${!__map[@]}"; do
+        fields+=("${key}=${__map[$key]}")
+    done
+    barnyard_join_by $'\n' "${fields[@]}" > "$file"
 }
 
 function barnyard_read_config() {
@@ -64,7 +68,148 @@ function barnyard_read_config() {
     done < "$config"
 }
 
-function run_modules() {
+function abend() {
+    log priority=3 "$@"
+    exit 1
+}
+
+
+function log() {
+    SALT=a5bbeb04f50fcdee70b0b5976438a8d8
+
+    function _log() {
+
+        local priority
+        if [[ -z "${PRIORITY["$1"]}" ]]; then
+            priority=info
+        else
+            priority="$1"
+            shift
+        fi
+
+        declare -a journald syslog
+        local name value regex='^([^=]+)=(.*)$'
+        while true; do
+            if [[ "$1" =~ $regex ]]; then
+                name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
+                journald+=("${name^^}=${value}")
+                syslog+=("${name}=${value}")
+                if [[ "$name" == priority ]]; then
+                    priority=$value
+                fi
+                shift
+            else
+                break
+            fi
+        done
+
+        if [[ "$priority" -gt "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]]; then
+            return
+        fi
+
+        local format="$1" message
+        shift
+        message=$(printf "$format\n" "$@")
+
+        local context=''
+        if [[ ${#syslog[@]} -ne 0 ]]; then
+            context="; $(barnyard_join_by ', ' "${syslog[@]}")"
+        fi
+
+        echo "$(date --rfc-3339=s | sed 's/+.*//') barnyard[info]: $message$context"
+
+        local id
+        id=$(echo "$SALT" "$format" | md5sum | cut -d' ' -f1)
+
+        journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=${PRIORITY[$priority]} SYSLOG_FACILITY=1)
+        echo "$(barnyard_join_by $'\n' "${journald[@]}")" | logger --journald
+    }
+    local module
+    if [[ -n "${o_barnyard[module]}" ]]; then
+        _log module="${o_barnyard[module]}" "$@"
+    else
+        _log "$@"
+    fi
+}
+
+function barnyard_divider() {
+    local label="$1"
+    local bar=--------------------------------------------------------------------------------
+    shift
+    local prefix="------- $label "
+    echo "$bar"
+    echo "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
+    echo "$bar"
+}
+
+function run() {
+    local module="$1" checkout="$2"
+    shift 2
+
+    declare -A o_module
+    barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
+
+    declare -a dependencies
+    if [[ -n "${o_module[@dependencies]}" ]]; then
+        read -r -a dependencies <<< "${o_module[@dependencies]}"
+        for dependency in "${dependencies[@]}"; do
+            if [[ -z "${seen[$module]}" ]]; then
+                log info module="$module" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${module}"
+                run "$dependency" "$checkout"
+            fi
+        done
+    fi
+
+    [[ -n "${seen[$module]}" ]] && return || seen["$module"]=0
+
+    mkdir -p /var/barnyard/applied
+
+    if [[ -e "/var/barnyard/applied/${module}" ]]; then
+        log module="$module" "already applied module %s" "${module}"
+        return
+    else
+        log module="$module" "applying module %s" "${module}"
+    fi
+
+    mkdir -p "$BARNYARD_TEMP/runs/$module"
+    if [[ "${o_barnyard[development]}" == yes ]]; then
+        cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
+    else
+        echo "here"
+        ${o_barnyard[git]} archive "${checkout}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
+    fi
+
+    o_barnyard[module]="$module"
+    barnyard_write_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
+    bash "$BARNYARD_TEMP/barnyard/run"
+    local code=$?
+    [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
+    o_barnyard[module]=''
+
+    echo "marked applied ${o_barnyard[module]}"
+    # ${o_barnyard[git]} log -n 1 --format='%H %at %GF' > "/var/barnyard/applied/${o_barnyard[module]}"
+}
+
+function main() {
+    declare -A PRIORITY
+
+    PRIORITY[panic]=0
+    PRIORITY[alert]=1
+    PRIORITY[crit]=2
+    PRIORITY[err]=3
+    PRIORITY[warn]=4
+    PRIORITY[notice]=5
+    PRIORITY[info]=6
+    PRIORITY[debug]=7
+
+    if [[ -n "$BARNYARD_LOG_LEVEL" ]]; then
+        [[ -z "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]] && abend "invalid log level %s" "$BARNYARD_LOG_LEVEL"
+    else
+        BARNYARD_LOG_LEVEL=info
+    fi
+
+    export BARNYARD_LOG_LEVEL
+
     declare -A o_barnyard
 
     o_barnyard[hostname]=$(hostname --long)
@@ -118,137 +263,43 @@ function run_modules() {
     machine="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}"
     modules="${o_barnyard[barnyard]}/modules"
 
-    while read -r func; do
-        export -f "$func"
-    done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' $0)
-
-    export -f log
-    export -f abend
-
     # https://stackoverflow.com/a/21941473
-
-    echo "Here ${#checkout[@]}"
     if [[ "${#checkout[@]}" -ne 0 ]]; then
+        while read -r func; do
+            export -f "$func"
+        done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' $0)
+
+        export -f log abend
+
+        declare -A seen
+
         barnyard_temporary_directory
-        BARNYARD_RM+=("$TMP/.run")
-        BARNYARD_RM+=("$TMP/.run.env")
-        barnyard_bash_resource barnyard_run > "$TMP/.run"
-        ${o_barnyard[git]} checkout -q "${checkout[0]}"
+
+        mkdir -p "$BARNYARD_TEMP/barnyard"
+        mkdir -p "$BARNYARD_TEMP/modules"
+        barnyard_bash_resource barnyard_run > "$BARNYARD_TEMP/barnyard/run"
+        barnyard_write_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
         for module in $(ls "$machine"); do
-            o_barnyard[module]="$module"
-            declare -p o_barnyard > "$TMP/.run.env"
-            bash -c ". $TMP/.run.env; . $TMP/.run"
-            [[ $? -ne 0 ]] && exit 1
+            run "$module" "${checkout[0]}"
         done
         mkdir -p "/var/barnyard/sha1"
-        echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
+        #echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
     fi
 }
 
-function abend() {
-    log priority=3 "$@"
-    exit 1
-}
-
-SALT=a5bbeb04f50fcdee70b0b5976438a8d8
-
-function log() {
-    declare -A PRIORITY
-
-    PRIORITY[panic]=0
-    PRIORITY[alert]=1
-    PRIORITY[crit]=2
-    PRIORITY[err]=3
-    PRIORITY[warn]=4
-    PRIORITY[notice]=5
-    PRIORITY[info]=6
-    PRIORITY[debug]=7
-
-    function _join_by() {
-      local d=${1-} f=${2-}
-      if shift 2; then
-        printf %s "$f" "${@/#/$d}"
-      fi
-    }
-
-    local priority
-    if [[ -z "${PRIORITY["$1"]}" ]]; then
-        priority=info
-    else
-        priority="$1"
-        shift
-    fi
-
-    declare -a journald syslog
-    local name value regex='^([^=]+)=(.*)$'
-    while true; do
-        echo "> $1"
-        if [[ "$1" =~ $regex ]]; then
-            name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
-            journald+=("${name^^}=${value}")
-            syslog+=("${name}=${value}")
-            if [[ "$name" == priority ]]; then
-                priority=$value
-            fi
-            shift
-        else
-            break
-        fi
-    done
-
-    local format="$1" message
-    shift
-    message=$(printf "$format\n" "$@")
-
-    local context=''
-    if [[ ${#syslog[@]} -ne 0 ]]; then
-        context="; $(_join_by ', ' "${syslog[@]}")"
-    fi
-
-    echo "$(date --rfc-3339=s | sed 's/+.*//') barnyard[info]: $message$context"
-
-    local id
-    id=$(echo "$SALT" "$format" | md5sum | cut -d' ' -f1)
-
-    journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=${PRIORITY[$priority]} SYSLOG_FACILITY=1)
-    echo "$(_join_by $'\n' "${journald[@]}")" | logger --journald
-}
-
-run_modules
+main
 
 exit
 
 ___ barnyard_run ___
 
-function run() {
-    if [[ -e "/var/barnyard/applied/${o_barnyard[module]}" ]]; then
-        echo alredy applied "${o_barnyard[module]}"
-        return
-    else
-        echo applying "${o_barnyard[module]}"
-    fi
-
-#    export -f log abend
-
-    declare -A o_module
+function main() {
+    declare -A PRIORITY o_barnyard o_module
+    barnyard_read_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
+    barnyard_read_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
     barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-
-    mkdir -p /var/barnyard/applied
-
-    if [[ -n "${o_module[dependencies]}" ]]; then
-        for depdendency in "${o_module[dependencies]}"; do
-            echo "have dependencies $depdendency"
-            exit 1
-        done
-    fi
-
-    . "${o_barnyard[barnyard]}/modules/${o_barnyard[module]}/apply"
-    [[ $? -ne 0 ]] && { echo 'bad run'; exit 1; }
-
-    echo "marked applied ${o_barnyard[module]}"
-    ${o_barnyard[git]} log -n 1 --format='%H %at %GF' > "/var/barnyard/applied/${o_barnyard[module]}"
+    . "$BARNYARD_TEMP/runs/${o_barnyard[module]}/modules/${o_barnyard[module]}/apply"
 }
 
-run
-
+main
 ___
