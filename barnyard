@@ -3,9 +3,10 @@
 # TODO Argument parser `f,fingerprint@` would be an array return.
 # TODO Using fingerprint to select from public keys.
 # TODO `--no-signatures`
+SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
 function barnyard_bash_resource() {
-    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' $0
+    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnyard"
 }
 
 function barnyard_cleanup() {
@@ -267,7 +268,7 @@ function main() {
     if [[ "${#checkout[@]}" -ne 0 ]]; then
         while read -r func; do
             export -f "$func"
-        done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' $0)
+        done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard")
 
         export -f log abend
 

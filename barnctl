@@ -13,7 +13,7 @@ esac
 SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
 function barnctl_bash_resource() {
-    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' $0
+    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
 
 function _barnctl_get_server() {
@@ -86,7 +86,7 @@ function barnctl_command_run() {
 }
 
 function acrectl_string_resource() {
-    awk '/^# ___ '$1' ___/{flag=1;next}/^# ___/{flag=0}flag' $0 | sed -E 's/^# ?//g'
+    awk '/^# ___ '$1' ___/{flag=1;next}/^# ___/{flag=0}flag' "$SCRIPT_DIR/barnctl" | sed -E 's/^# ?//g'
 }
 
 function abend() {
@@ -210,7 +210,7 @@ function barnctl_parse_arguments() {
 }
 
 IFS=$'\n' read -d '' -r -a BARNCTL_COMMANDS < <( \
-    sed -n 's/^function barnctl_command_\(.*\)() {$/\1/p' $0 \
+    sed -n 's/^function barnctl_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnctl" \
 )
 
 function barnctl_next_command() {
