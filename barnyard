@@ -188,7 +188,7 @@ function run() {
     o_barnyard[module]=''
 
     echo "marked applied ${o_barnyard[module]}"
-    # ${o_barnyard[git]} log -n 1 --format='%H %at %GF' > "/var/barnyard/applied/${o_barnyard[module]}"
+    ${o_barnyard[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/barnyard/applied/${o_barnyard[module]}"
 }
 
 function main() {
@@ -284,7 +284,7 @@ function main() {
             run "$module" "${checkout[0]}"
         done
         mkdir -p "/var/barnyard/sha1"
-        #echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
+        echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
     fi
 }
 
