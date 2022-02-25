@@ -187,7 +187,7 @@ function run() {
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
     o_barnyard[module]=''
 
-    echo "marked applied ${o_barnyard[module]}"
+    log module="$module" "marking module %s as applied" "${module}"
     ${o_barnyard[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/barnyard/applied/${o_barnyard[module]}"
 }
 
