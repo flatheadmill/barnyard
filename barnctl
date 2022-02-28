@@ -85,6 +85,17 @@ function barnctl_command_run() {
     ssh "$(_barnctl_get_server "${o_argv[0]}" "$o_user")" sudo /usr/local/bin/barnyard
 }
 
+function barnctl_command_develop() {
+    local o_help
+    barnctl_parse_arguments develop "h,help" -- "$@"
+    local directory
+    [[ ${#o_argv[@]} -ne 0 ]] || abend develop_directory_required
+    directory=${o_argv[0]}
+    [[ -d "$directory" ]] || abend develop_not_a_directory "$directory"
+    local user
+    user=$(
+}
+
 function acrectl_string_resource() {
     awk '/^# ___ '$1' ___/{flag=1;next}/^# ___/{flag=0}flag' "$SCRIPT_DIR/barnctl" | sed -E 's/^# ?//g'
 }
