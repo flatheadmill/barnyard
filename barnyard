@@ -69,11 +69,22 @@ function barnyard_read_config() {
     done < "$config"
 }
 
+function barnyard_parse_arguments() {
+    declare -n __array="$1"
+    shift
+    local regex='^([^=]+)=(.*)$'
+    while [[ $# -ne 0 ]]; do
+        [[ "$1" =~ $regex ]] || abend bad_argument "$1"
+        shift
+        local name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
+        __array["$name"]="$value"
+    done
+}
+
 function abend() {
     log priority=3 "$@"
     exit 1
 }
-
 
 function log() {
     SALT=a5bbeb04f50fcdee70b0b5976438a8d8
@@ -144,41 +155,61 @@ function barnyard_divider() {
 }
 
 function run() {
-    local module="$1" checkout="$2"
-    shift 2
+    local module="$1"
+    shift
 
     declare -A o_module
     barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
 
-    declare -a dependencies
-    if [[ -n "${o_module[@dependencies]}" ]]; then
-        read -r -a dependencies <<< "${o_module[@dependencies]}"
-        for dependency in "${dependencies[@]}"; do
-            if [[ -z "${seen[$module]}" ]]; then
-                log info module="$module" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${module}"
-                run "$dependency" "$checkout"
-            fi
-        done
-    fi
+    function _production_dependencies() {
+        if [[ -n "${o_module[@dependencies]}" ]]; then
+            declare -a dependencies
+            read -r -a dependencies <<< "${o_module[@dependencies]}"
+            for dependency in "${dependencies[@]}"; do
+                if [[ -z "${seen[$module]}" ]]; then
+                    log info module="$module" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${module}"
+                    run "$dependency"
+                fi
+            done
+        fi
+    }
+
+    function _development_dependencies() {
+        true
+    }
+
+    _${o_barnyard[stage]}_dependencies
 
     [[ -n "${seen[$module]}" ]] && return || seen["$module"]=0
 
     mkdir -p /var/barnyard/applied
 
-    if [[ -e "/var/barnyard/applied/${module}" ]]; then
+    function _production_check_applied() {
+        if [[ ! -e "/var/barnyard/applied/${module}" ]]; then
+            log module="$module" "applying module %s" "${module}"
+            return 1
+        fi
         log module="$module" "already applied module %s" "${module}"
-        return
-    else
+    }
+
+    function _development_check_applied() {
         log module="$module" "applying module %s" "${module}"
-    fi
+        return 1
+    }
+
+    _${o_barnyard[stage]}_check_applied && return
+
+    function _development_extract() {
+        cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
+    }
+
+    function _production_extract() {
+        ${o_registers[git]} archive "${o_registers[checkout]}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
+    }
 
     mkdir -p "$BARNYARD_TEMP/runs/$module"
-    if [[ "${o_barnyard[development]}" == yes ]]; then
-        cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
-    else
-        echo "here"
-        ${o_barnyard[git]} archive "${checkout}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
-    fi
+
+    _${o_barnyard[stage]}_extract
 
     o_barnyard[module]="$module"
     barnyard_write_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
@@ -187,8 +218,38 @@ function run() {
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
     o_barnyard[module]=''
 
-    log module="$module" "marking module %s as applied" "${module}"
-    ${o_barnyard[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/barnyard/applied/${module}"
+    function _production_mark_applied() {
+        log module="$module" "marking module %s as applied" "${module}"
+        ${o_registers[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/barnyard/applied/${module}"
+    }
+
+    function _development_mark_applied() {
+        true
+    }
+
+    _${o_barnyard[stage]}_mark_applied
+}
+
+function loop_modules() {
+    while read -r func; do
+        export -f "$func"
+    done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard")
+
+    export -f log abend
+
+    mkdir -p "/var/barnyard/sha1"
+
+    barnyard_temporary_directory
+
+    mkdir -p "$BARNYARD_TEMP/barnyard"
+    mkdir -p "$BARNYARD_TEMP/modules"
+
+    barnyard_bash_resource barnyard_run > "$BARNYARD_TEMP/barnyard/run"
+    barnyard_write_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
+
+    declare -A seen
+
+    for module in "$@"; do run "$module"; done
 }
 
 function main() {
@@ -209,9 +270,11 @@ function main() {
         BARNYARD_LOG_LEVEL=info
     fi
 
+    # TODO Maybe this should be inside `o_barnyard`, everything else is. Didn't
+    # have argument parsing when I wrote this, though.
     export BARNYARD_LOG_LEVEL
 
-    declare -A o_barnyard
+    declare -A o_barnyard o_registers
 
     o_barnyard[hostname]=$(hostname --long)
     barnyard_read_config o_barnyard /etc/barnyard/config
@@ -220,75 +283,67 @@ function main() {
         o_barnyard[barnyard]=/var/barnyard/repository
     fi
 
-    export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes'
-    o_barnyard[git]="git -C ${o_barnyard[barnyard]}"
-    if [[ -n "${o_barnyard[owner]}" ]]; then
-        export GIT_SSH_COMMAND=ssh
-        export SHELL=/bin/bash
-        o_barnyard[git]="sudo --preserve-env=SSH_AUTH_SOCK -s -u ${o_barnyard[owner]} ${o_barnyard[git]}"
-    fi
+    barnyard_parse_arguments o_registers "$@"
 
-    ${o_barnyard[git]} checkout -q "${o_barnyard[branch]}"
-
-    ${o_barnyard[git]} pull -q origin "$branch"
-
-    local current=()
-    if [[ -e "/var/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
-        local sha1=$(<"/var/barnyard/sha1/${o_barnyard[hostname]}")
-        IFS=' ' read -a current <<< "$(${o_barnyard[git]} log -n 1 --format='%H %at %GF' "$sha1")"
-    fi
-
-    declare -A when
-    checkout=()
-    if [[ "${#current[@]}" -eq 0 ]]; then
-        while read -r line; do
-            IFS=' ' read -a fields <<< "$line"
-            if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" ]]; then
-                checkout=("${fields[@]}")
-                break
-            fi
-        done < <(${o_barnyard[git]} log --format='%H %at %GF')
+    if [[ -n "${o_registers[develop]}" || -n "${o_registers[modules]}" ]]; then
+        [[ -n "$SUDO_USER" ]] || abend must_run_develop_through_sudo
+        [[ -n "${o_registers[develop]}" ]] && o_barnyard[barnyard]="$(readlink -f "${o_registers[develop]}")"
+        [[ -n "${o_registers[modules]}" ]] || o_register[modules]=''
+        [[ -e "${o_barnyard[barnyard]}" ]] || abend barnyard_does_not_exist "${o_barnyard[barnyard]}"
+        [[ $(stat -c '%U' "${o_barnyard[barnyard]}/.git/index") == $SUDO_USER ]] || \
+            abend sudo_user_does_not_own "$SUDO_USER" "${o_barnyard[barnyard]}"
+        declare -a modules
+        IFS=' ' read -a modules <<< "${o_registers[modules]}"
+        o_barnyard[stage]=development
+        loop_modules "${modules[@]}"
     else
-        while read -r line; do
-            IFS=' ' read -a fields <<< "$line"
-            if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" && ${fields[1]} -gt ${current[1]} ]]; then
-                checkout=("${fields[@]}")
-                break
-            fi
-            if [[ "${fields[0]}" == "${current[0]}" ]]; then
-                break
-            fi
-        done < <(${o_barnyard[git]} log --format='%H %at %GF')
-    fi
+        export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes'
+        o_registers[git]="git -C $(printf %q ${o_barnyard[barnyard]})"
+        ${o_registers[git]} checkout -q "${o_barnyard[branch]}"
+        ${o_registers[git]} pull -q origin "$branch"
+        declare -a current
+        local sha1
+        if [[ -e "/var/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
+            sha1=$(<"/var/barnyard/sha1/${o_barnyard[hostname]}")
+            IFS=' ' read -a current <<< "$(${o_registers[git]} log -n 1 --format='%H %at %GF' "$sha1")"
+        fi
 
-    machine="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}"
-    modules="${o_barnyard[barnyard]}/modules"
+        if [[ "${#current[@]}" -eq 0 ]]; then
+            while read -r line; do
+                IFS=' ' read -a fields <<< "$line"
+                if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" ]]; then
+                    checkout=("${fields[@]}")
+                    break
+                fi
+            done < <(${o_registers[git]} log --format='%H %at %GF')
+        else
+            while read -r line; do
+                IFS=' ' read -a fields <<< "$line"
+                if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" && ${fields[1]} -gt ${current[1]} ]]; then
+                    checkout=("${fields[@]}")
+                    break
+                fi
+                if [[ "${fields[0]}" == "${current[0]}" ]]; then
+                    break
+                fi
+            done < <(${o_registers[git]} log --format='%H %at %GF')
+        fi
 
-    # https://stackoverflow.com/a/21941473
-    if [[ "${#checkout[@]}" -ne 0 ]]; then
-        while read -r func; do
-            export -f "$func"
-        done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard")
+        # https://stackoverflow.com/a/21941473
+        if [[ "${#checkout[@]}" -ne 0 ]]; then
+            o_registers[checkout]="${checkout[0]}"
+            o_barnyard[stage]=production
 
-        export -f log abend
+            declare -a modules
+            mapfile -t modules <<< "$(ls "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}")"
+            loop_modules "${modules[@]}"
 
-        declare -A seen
-
-        barnyard_temporary_directory
-
-        mkdir -p "$BARNYARD_TEMP/barnyard"
-        mkdir -p "$BARNYARD_TEMP/modules"
-        barnyard_bash_resource barnyard_run > "$BARNYARD_TEMP/barnyard/run"
-        barnyard_write_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
-        for module in $(ls "$machine"); do
-            run "$module" "${checkout[0]}"
-        done
-        mkdir -p "/var/barnyard/sha1"
-        echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
+            echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
+        fi
     fi
 }
 
-main
+main "$@"
 
 exit
 
