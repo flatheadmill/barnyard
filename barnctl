@@ -92,8 +92,6 @@ function barnctl_command_develop() {
     [[ ${#o_argv[@]} -ne 0 ]] || abend develop_directory_required
     directory=${o_argv[0]}
     [[ -d "$directory" ]] || abend develop_not_a_directory "$directory"
-    local user
-    user=$(
 }
 
 function acrectl_string_resource() {
