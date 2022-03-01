@@ -158,13 +158,15 @@ function run() {
     local module="$1"
     shift
 
+    local configuration="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
+    [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
     declare -A o_module
-    barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
+    barnyard_read_config o_module "$configuration"
 
     function _production_dependencies() {
-        if [[ -n "${o_module[@dependencies]}" ]]; then
+        if [[ -n "${o_module['%dependencies']}" ]]; then
             declare -a dependencies
-            read -r -a dependencies <<< "${o_module[@dependencies]}"
+            read -r -a dependencies <<< "${o_module['%dependencies']}"
             for dependency in "${dependencies[@]}"; do
                 if [[ -z "${seen[$module]}" ]]; then
                     log info module="$module" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${module}"
