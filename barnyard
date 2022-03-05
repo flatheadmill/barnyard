@@ -163,6 +163,8 @@ function run() {
     declare -A o_module
     barnyard_read_config o_module "$configuration"
 
+    # TODO This is goofy. Just use if statements.
+
     function _production_dependencies() {
         if [[ -n "${o_module['%dependencies']}" ]]; then
             declare -a dependencies
