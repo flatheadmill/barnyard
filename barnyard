@@ -163,9 +163,7 @@ function run() {
     declare -A o_module
     barnyard_read_config o_module "$configuration"
 
-    # TODO This is goofy. Just use if statements.
-
-    function _production_dependencies() {
+    if [[ "${o_barnyard[stage]}" = production ]]; then
         if [[ -n "${o_module['%dependencies']}" ]]; then
             declare -a dependencies
             read -r -a dependencies <<< "${o_module['%dependencies']}"
@@ -176,44 +174,25 @@ function run() {
                 fi
             done
         fi
-    }
-
-    function _development_dependencies() {
-        true
-    }
-
-    _${o_barnyard[stage]}_dependencies
+    fi
 
     [[ -n "${seen[$module]}" ]] && return || seen["$module"]=0
 
     mkdir -p /var/barnyard/applied
 
-    function _production_check_applied() {
-        if [[ ! -e "/var/barnyard/applied/${module}" ]]; then
-            log module="$module" "applying module %s" "${module}"
-            return 1
-        fi
+
+    if [[ "${o_barnyard[stage]}" = production && -e "/var/barnyard/applied/${module}" ]]; then
         log module="$module" "already applied module %s" "${module}"
-    }
-
-    function _development_check_applied() {
-        log module="$module" "applying module %s" "${module}"
-        return 1
-    }
-
-    _${o_barnyard[stage]}_check_applied && return
-
-    function _development_extract() {
-        cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
-    }
-
-    function _production_extract() {
-        ${o_registers[git]} archive "${o_registers[checkout]}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
-    }
+        return 0
+    fi
 
     mkdir -p "$BARNYARD_TEMP/runs/$module"
 
-    _${o_barnyard[stage]}_extract
+    if [[ "${o_barnyard[stage]}" = production ]]; then
+        ${o_registers[git]} archive "${o_registers[checkout]}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
+    else
+        cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
+    fi
 
     o_barnyard[module]="$module"
     barnyard_write_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
@@ -222,16 +201,10 @@ function run() {
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
     o_barnyard[module]=''
 
-    function _production_mark_applied() {
+    if [[ "${o_barnyard[stage]}" = production ]]; then
         log module="$module" "marking module %s as applied" "${module}"
         ${o_registers[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/barnyard/applied/${module}"
-    }
-
-    function _development_mark_applied() {
-        true
-    }
-
-    _${o_barnyard[stage]}_mark_applied
+    fi
 }
 
 function loop_modules() {
