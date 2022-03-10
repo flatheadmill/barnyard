@@ -181,9 +181,21 @@ function run() {
     mkdir -p /var/barnyard/applied
 
 
-    if [[ "${o_barnyard[stage]}" = production && -e "/var/barnyard/applied/${module}" ]]; then
-        log module="$module" "already applied module %s" "${module}"
-        return 0
+    if [[ "${o_barnyard[stage]}" = production ]]; then
+        case "${o_barnyard[run]}" in
+            once )
+                if [[ -e "/var/barnyard/applied/${module}" ]]; then
+                    log module="$module" "already applied module %s" "${module}"
+                    return 0
+                fi
+                ;;
+            diff )
+                ;;
+            explicit )
+                log module="$module" "module % run set to explicit, skipping" "${module}"
+                return 0
+                ;;
+        esac
     fi
 
     mkdir -p "$BARNYARD_TEMP/runs/$module"
