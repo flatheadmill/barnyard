@@ -161,7 +161,7 @@ function run() {
 
 
     if [[ "${o_barnyard[stage]}" = production ]]; then
-        case "${o_barnyard[run]}" in
+        case "${o_module[%run]}" in
             once )
                 if [[ -e "/var/barnyard/applied/${module}" ]]; then
                     log module="$module" "already applied module %s" "${module}"
