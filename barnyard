@@ -20,27 +20,6 @@ function barnyard_temporary_directory() {
     trap barnyard_cleanup EXIT
 }
 
-function barnyard_github_go_release_install() {
-    local uri=$1
-
-    local base="${uri##*/}"
-    # TODO A more wicked regex would catch exactly what we can extract.
-    regex='(.*)_v[0-9]+\.[0-9]+'
-    [[ "$base" =~ $regex ]] || abend cannot_determine_program_name
-    local program="${BASH_REMATCH[1]}"
-
-    if [[ ! -e "/usr/local/bin/$program" ]]; then
-        barnyard_temporary_directory
-        local file="$BARNYARD_TEMP/github-$(date +%s).tar.gz"
-        BARNYARD_RM+=("$file")
-        curl -Ls -o "$file" "$uri"
-        echo "$file" "${base%.*.*}"
-        local tag="${base%.*.*}"
-        tar xf "$file" "$tag/$program" -O | sudo tee "/usr/local/bin/$program" > /dev/null
-        sudo chmod +x "/usr/local/bin/$program"
-    fi
-}
-
 function barnyard_join_by() {
     local d=${1-} f=${2-}
     if shift 2; then
