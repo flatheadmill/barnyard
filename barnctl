@@ -25,7 +25,7 @@ function _barnctl_get_server() {
 }
 
 function barnctl_command_bootstrap() {
-    local o_help o_gpg o_github o_repository o_branch
+    local o_help o_gpg o_github o_repository o_branch o_user
     barnctl_parse_arguments bootstrap \
         "h,help" \
         "u,user:" \
@@ -63,12 +63,31 @@ function barnctl_command_bootstrap() {
     _compile_script | ssh "$server" bash -s "$(printf " %q" "$o_repository" "$o_branch" "$gpg_key" "$fingerprint")"
 }
 
+function barnctl_command_update() {
+    local o_help o_user
+    barnctl_parse_arguments update "h,help" "u,user:" -- "$@"
+
+    local server=${o_argv[0]}
+    if [[ -n "$o_user" ]]; then
+        server="$o_user@$server"
+    fi
+
+    function _compile_script() {
+        # TODO Why two forms of substitution?
+        echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
+        cat "${SCRIPT_DIR}/barnyard"
+        echo 'EOF'
+        echo '))'
+        echo ''
+        barnctl_bash_resource barnctl_update
+    }
+
+    _compile_script | ssh "$server" bash
+}
+
 function barnctl_command_prepare() {
     local o_user
-    barnctl_parse_arguments prepare \
-        "h,help" \
-        "u,user:" \
-        -- "$@"
+    barnctl_parse_arguments prepare "h,help" "u,user:" -- "$@"
     local server=${o_argv[0]}
     if [[ -n "$o_user" ]]; then
         server="$o_user@$server"
@@ -343,5 +362,12 @@ chmod +x /usr/local/bin/barnyard
 
 age-keygen -o /etc/barnyard/age 2>/dev/null
 awk '/^# public key:/ { print $4 }' /etc/barnyard/age
+EOF
+___ barnctl_update ___
+cat <<'EOF' | sudo bash -s "$BARNYARD_SOURCE"
+source="$1"
+rm -f /usr/local/bin/barnyard
+echo "$source" > /usr/local/bin/barnyard
+chmod +x /usr/local/bin/barnyard
 EOF
 ___
