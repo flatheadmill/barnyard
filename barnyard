@@ -159,7 +159,6 @@ function run() {
 
     mkdir -p /var/barnyard/applied
 
-
     if [[ "${o_barnyard[stage]}" = production ]]; then
         case "${o_module[%run]}" in
             once )
@@ -169,6 +168,15 @@ function run() {
                 fi
                 ;;
             diff )
+                if [[ -e "/var/barnyard/applied/${module}" ]]; then
+                    declare application
+                    read -r -a application < "/var/barnyard/applied/${module}"
+                    if ${o_registers[git]} diff --quiet "${application[0]}"; then
+                        log module="$module" "already applied module %s" "${module}"
+                        return 0
+                    fi
+                    exit
+                fi
                 ;;
             explicit )
                 log module="$module" "module % run set to explicit, skipping" "${module}"
@@ -261,6 +269,7 @@ function main() {
         [[ $(stat -c '%U' "${o_barnyard[barnyard]}/.git/index") == $SUDO_USER ]] || \
             abend sudo_user_does_not_own "$SUDO_USER" "${o_barnyard[barnyard]}"
         declare -a modules
+        o_registers[git]="sudo -u $SUDO_USER git -C $(printf %q ${o_barnyard[barnyard]})"
         IFS=' ' read -a modules <<< "${o_registers[modules]}"
         o_barnyard[stage]=development
         loop_modules "${modules[@]}"
