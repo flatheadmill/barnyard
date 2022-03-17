@@ -140,7 +140,7 @@ function run() {
     local configuration="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
     [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
     declare -A o_module
-    barnyard['%run']=once
+    o_barnyard['%run']=once
     barnyard_read_config o_module "$configuration"
 
     if [[ "${o_barnyard[stage]}" = production ]]; then
