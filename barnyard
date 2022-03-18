@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# TODO Cannot remember all that I wanted to do with property names, but it seems
+# like all I need are the directives and based64 encoding. Maybe include is
+# something like `@/modules/postgresql/common`.
 # TODO Argument parser `f,fingerprint@` would be an array return.
 # TODO Using fingerprint to select from public keys.
 # TODO `--no-signatures`
@@ -140,13 +143,13 @@ function run() {
     local configuration="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
     [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
     declare -A o_module
-    o_barnyard['%run']=once
+    o_barnyard[_run]=once
     barnyard_read_config o_module "$configuration"
 
     if [[ "${o_barnyard[stage]}" = production ]]; then
-        if [[ -n "${o_module['%dependencies']}" ]]; then
+        if [[ -n "${o_module[_dependencies]}" ]]; then
             declare -a dependencies
-            read -r -a dependencies <<< "${o_module['%dependencies']}"
+            read -r -a dependencies <<< "${o_module[_dependencies]}"
             for dependency in "${dependencies[@]}"; do
                 if [[ -z "${seen[$module]}" ]]; then
                     log info module="$module" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${module}"
@@ -161,7 +164,7 @@ function run() {
     mkdir -p /var/barnyard/applied
 
     if [[ "${o_barnyard[stage]}" = production ]]; then
-        case "${o_module[%run]}" in
+        case "${o_module[_run]}" in
             once )
                 if [[ -e "/var/barnyard/applied/${module}" ]]; then
                     log module="$module" "already applied module %s" "${module}"
