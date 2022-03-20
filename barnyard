@@ -4,8 +4,6 @@
 # like all I need are the directives and based64 encoding. Maybe include is
 # something like `@/modules/postgresql/common`.
 # TODO Argument parser `f,fingerprint@` would be an array return.
-# TODO Using fingerprint to select from public keys.
-# TODO `--no-signatures`
 SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
 function barnyard_bash_resource() {
@@ -250,8 +248,7 @@ function main() {
         BARNYARD_LOG_LEVEL=info
     fi
 
-    # TODO Maybe this should be inside `o_barnyard`, everything else is. Didn't
-    # have argument parsing when I wrote this, though.
+    # An environment variable so someone can set this in their shell.
     export BARNYARD_LOG_LEVEL
 
     declare -A o_barnyard o_registers
