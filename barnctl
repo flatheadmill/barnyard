@@ -25,11 +25,12 @@ function _barnctl_get_server() {
 }
 
 function barnctl_command_bootstrap() {
-    local o_help o_gpg o_github o_repository o_branch o_user
+    local o_help o_fingerprint o_github o_repository o_branch o_user o_force=1
     barnctl_parse_arguments bootstrap \
         "h,help" \
         "u,user:" \
-        "g,gpg:" "G,github:" \
+        "f,force" \
+        "p,fingerprint:" "G,github:" \
         "b,branch:" "r,repository:" \
         -- "$@"
 
@@ -38,13 +39,13 @@ function barnctl_command_bootstrap() {
         server="$o_user@$server"
     fi
 
-    local gpg_key=$(<"$o_gpg")
+#    local gpg_key=$(<"$o_gpg")
 
-    local fingerprint=$( \
-        echo "$gpg_key" | \
-            gpg --with-colons --import-options show-only --import --fingerprint | \
-            awk -F: '/^fpr/ { print $10; exit }' \
-    )
+#    local fingerprint=$( \
+#        echo "$gpg_key" | \
+#            gpg --with-colons --import-options show-only --import --fingerprint | \
+#            awk -F: '/^fpr/ { print $10; exit }' \
+#    )
 
     function _compile_script() {
         echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
@@ -60,7 +61,7 @@ function barnctl_command_bootstrap() {
     }
 
     # https://unix.stackexchange.com/a/414640
-    _compile_script | ssh "$server" bash -s "$(printf " %q" "$o_repository" "$o_branch" "$gpg_key" "$fingerprint")"
+    _compile_script | ssh "$server" bash -s "$(printf " %q" "$o_repository" "$o_branch" "$o_fingerprint" "$o_force")"
 }
 
 function barnctl_command_update() {
@@ -287,9 +288,16 @@ function abend() {
     exit 1
 }
 
-cat <<'EOF' | sudo bash
+cat <<'EOF' | sudo bash -s "$@" || exit 1
 set -e
 set -o pipefail
+
+force=$4
+
+if [[ ( -e /etc/barnyard || -e /var/barnyard ) && "$force" != 0 ]]; then
+    echo "error: Barnyard already installed, use \`--force\` to overwrite." 1>&2
+    exit 1
+fi
 
 rm -f /usr/local/bin/barnyard
 rm -rf /etc/barnyard
@@ -316,8 +324,7 @@ set -o pipefail
 source="$1"
 repository="$2"
 branch="$3"
-gpg="$4"
-fingerprint="$5"
+fingerprint="$4"
 
 function abend() {
     local message=$1
@@ -338,24 +345,15 @@ umask 077
 mkdir -p /root/.ssh
 umask 022
 
-gpg --quiet --import <(echo "$gpg") 2>/dev/null >/dev/null
-
 known_github="github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg="
 echo "$known_github" > /root/.ssh/known_hosts
 
 GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes' \
     git clone -qb "$branch" "$repository" /var/barnyard/repository 2> /dev/null
 
-declare -a checkout=()
-while read -r line; do
-    IFS=' ' read -a fields <<< "$line"
-    if [[ "${fields[2]}" == "$fingerprint" ]]; then
-        checkout=("${fields[@]}")
-        break
-    fi
-done < <(git -C /var/barnyard/repository log --format='%H %at %GF')
-
-[[ "${#checkout[@]}" -eq 0 ]] && abend 'unable to find signed commit'
+for key in $(find /var/barnyard/repository/public_keys -name \*.asc); do
+    gpg --import "$key" 2>/dev/null >/dev/null
+done
 
 echo "$source" > /usr/local/bin/barnyard
 chmod +x /usr/local/bin/barnyard
