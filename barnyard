@@ -134,6 +134,27 @@ function barnyard_divider() {
     echo "$bar"
 }
 
+function barnyard_quotedoc() {
+    local heredoc spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
+    declare -a lines
+    while read -r line; do
+        lines+=("$line")
+        if [[ "$line" =~ $leading ]]; then
+            if [[ "${#BASH_REMATCH[1]}" -lt "$spaces" ]]; then
+                spaces="${#BASH_REMATCH[1]}"
+            fi
+        else
+            echo miss
+        fi
+    done < /dev/stdin
+    read -r -d '' dedented < <(printf "%s\n" "${lines[@]}" | sed -E 's/^ {'$spaces'}//')
+    eval "$({
+        echo "cat <<EOF"
+        echo -n "$dedented"
+        echo "EOF"
+    })"
+}
+
 function run() {
     local module="$1"
     shift
