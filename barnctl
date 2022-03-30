@@ -119,15 +119,29 @@ acrectl_string_resource() {
 }
 
 abend() {
-    local resource=$1
-    shift
-    local message=$(acrectl_string_resource error_$resource)
-    if [[ -z $message ]]; then
-        echo "error:" "$resource" "$@" 1>&2
-    else
-        printf "error: ${message}\n" "$@" 1>&2
-    fi
+    acrectl_quotedoc < /dev/stdin 1>&2
     exit 1
+}
+
+barnctl_quotedoc() {
+    local heredoc spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
+    declare -a lines
+    while read -r line; do
+        lines+=("$line")
+        if [[ "$line" =~ $leading ]]; then
+            if [[ "${#BASH_REMATCH[1]}" -lt "$spaces" ]]; then
+                spaces="${#BASH_REMATCH[1]}"
+            fi
+        else
+            echo miss
+        fi
+    done < /dev/stdin
+    read -r -d '' dedented < <(printf "%s\n" "${lines[@]}" | sed -E 's/^ {'$spaces'}//')
+    eval "$({
+        echo "cat <<EOF"
+        echo -n "$dedented"
+        echo "EOF"
+    })"
 }
 
 barnctl_parse_arguments() {
@@ -149,6 +163,7 @@ barnctl_parse_arguments() {
                 ;;
             *)
                 local regex='([a-zA-Z0-9]?),([^:]*)(:?)'
+                # TODO Eval arguments instead.
                 [[ $1 =~ $regex ]] || abend bad_parameter_argument "$1"
                 local short=${BASH_REMATCH[1]} long=${BASH_REMATCH[2]} arged_2=${BASH_REMATCH[3]}
                 local arged=1
