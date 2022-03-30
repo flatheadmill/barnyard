@@ -12,11 +12,11 @@ esac
 
 SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
-function barnctl_bash_resource() {
+barnctl_bash_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
 
-function _barnctl_get_server() {
+_barnctl_get_server() {
     local server="$1" user="$2"
     if [[ -z "$user" ]]; then
         echo "$server"
@@ -24,7 +24,7 @@ function _barnctl_get_server() {
     echo "$user@$server"
 }
 
-function barnctl_command_bootstrap() {
+barnctl_command_bootstrap() {
     local o_help o_fingerprint o_github o_repository o_branch o_user o_force=1
     barnctl_parse_arguments bootstrap \
         "h,help" \
@@ -47,7 +47,7 @@ function barnctl_command_bootstrap() {
 #            awk -F: '/^fpr/ { print $10; exit }' \
 #    )
 
-    function _compile_script() {
+    _compile_script() {
         echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
         cat "${SCRIPT_DIR}/barnyard"
         echo 'EOF'
@@ -64,7 +64,7 @@ function barnctl_command_bootstrap() {
     _compile_script | ssh "$server" bash -s "$(printf " %q" "$o_repository" "$o_branch" "$o_fingerprint" "$o_force")"
 }
 
-function barnctl_command_update() {
+barnctl_command_update() {
     local o_help o_user
     barnctl_parse_arguments update "h,help" "u,user:" -- "$@"
 
@@ -73,7 +73,7 @@ function barnctl_command_update() {
         server="$o_user@$server"
     fi
 
-    function _compile_script() {
+    _compile_script() {
         # TODO Why two forms of substitution?
         echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
         cat "${SCRIPT_DIR}/barnyard"
@@ -86,7 +86,7 @@ function barnctl_command_update() {
     _compile_script | ssh "$server" bash
 }
 
-function barnctl_command_prepare() {
+barnctl_command_prepare() {
     local o_user
     barnctl_parse_arguments prepare "h,help" "u,user:" -- "$@"
     local server=${o_argv[0]}
@@ -96,7 +96,7 @@ function barnctl_command_prepare() {
     barnctl_bash_resource barnctl_prepare | ssh "$server" bash
 }
 
-function barnctl_command_run() {
+barnctl_command_run() {
     local o_user
     barnctl_parse_arguments run \
         "h,help" \
@@ -105,7 +105,7 @@ function barnctl_command_run() {
     ssh "$(_barnctl_get_server "${o_argv[0]}" "$o_user")" sudo /usr/local/bin/barnyard
 }
 
-function barnctl_command_develop() {
+barnctl_command_develop() {
     local o_help
     barnctl_parse_arguments develop "h,help" -- "$@"
     local directory
@@ -114,11 +114,11 @@ function barnctl_command_develop() {
     [[ -d "$directory" ]] || abend develop_not_a_directory "$directory"
 }
 
-function acrectl_string_resource() {
+acrectl_string_resource() {
     awk '/^# ___ '$1' ___/{flag=1;next}/^# ___/{flag=0}flag' "$SCRIPT_DIR/barnctl" | sed -E 's/^# ?//g'
 }
 
-function abend() {
+abend() {
     local resource=$1
     shift
     local message=$(acrectl_string_resource error_$resource)
@@ -130,7 +130,7 @@ function abend() {
     exit 1
 }
 
-function barnctl_parse_arguments() {
+barnctl_parse_arguments() {
     local usage=$1
     shift
 
@@ -239,10 +239,10 @@ function barnctl_parse_arguments() {
 }
 
 IFS=$'\n' read -d '' -r -a BARNCTL_COMMANDS < <( \
-    sed -n 's/^function barnctl_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnctl" \
+    sed -n 's/^barnctl_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnctl" \
 )
 
-function barnctl_next_command() {
+barnctl_next_command() {
     local prefix=$1 command=$2
     shift 2
     for func in "${BARNCTL_COMMANDS[@]}"; do
@@ -282,7 +282,7 @@ echo '######### did this work? ##########'
 gpg --list-keys
 EOF
 ___ barnctl_bootstrap ___
-function abend() {
+abend() {
     local message=$1
     echo "$message" 1>&2
     exit 1
@@ -326,7 +326,7 @@ repository="$2"
 branch="$3"
 fingerprint="$4"
 
-function abend() {
+abend() {
     local message=$1
     echo "$message" 1>&2
     exit 1

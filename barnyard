@@ -6,29 +6,29 @@
 # TODO Argument parser `f,fingerprint@` would be an array return.
 SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
-function barnyard_bash_resource() {
+barnyard_bash_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnyard"
 }
 
-function barnyard_cleanup() {
+barnyard_cleanup() {
     rm -rf "$BARNYARD_TEMP"
 }
 
-function barnyard_temporary_directory() {
+barnyard_temporary_directory() {
     [[ -n "$BARNYARD_TEMP" ]] && return
     BARNYARD_TEMP="$(mktemp -d)"
     export BARNYARD_TEMP
     trap barnyard_cleanup EXIT
 }
 
-function barnyard_join_by() {
+barnyard_join_by() {
     local d=${1-} f=${2-}
     if shift 2; then
         printf %s "$f" "${@/#/$d}"
     fi
 }
 
-function barnyard_write_config() {
+barnyard_write_config() {
     declare -n __map="$1"
     local file="$2"
     shift 2
@@ -39,7 +39,7 @@ function barnyard_write_config() {
     barnyard_join_by $'\n' "${fields[@]}" > "$file"
 }
 
-function barnyard_read_config() {
+barnyard_read_config() {
     declare -n __array="$1"
     local config=$2 regex='^([^=]+)=(.*)$'
     while read -r line; do
@@ -49,7 +49,7 @@ function barnyard_read_config() {
     done < "$config"
 }
 
-function barnyard_parse_arguments() {
+barnyard_parse_arguments() {
     declare -n __array="$1"
     shift
     local regex='^([^=]+)=(.*)$'
@@ -61,15 +61,15 @@ function barnyard_parse_arguments() {
     done
 }
 
-function abend() {
+abend() {
     log priority=3 "$@"
     exit 1
 }
 
-function log() {
+log() {
     SALT=a5bbeb04f50fcdee70b0b5976438a8d8
 
-    function _log() {
+    _log() {
 
         local priority
         if [[ -z "${PRIORITY["$1"]}" ]]; then
@@ -124,7 +124,7 @@ function log() {
     fi
 }
 
-function barnyard_divider() {
+barnyard_divider() {
     local label="$1"
     local bar=--------------------------------------------------------------------------------
     shift
@@ -134,7 +134,7 @@ function barnyard_divider() {
     echo "$bar"
 }
 
-function barnyard_quotedoc() {
+barnyard_quotedoc() {
     local heredoc spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
     declare -a lines
     while read -r line; do
@@ -155,7 +155,7 @@ function barnyard_quotedoc() {
     })"
 }
 
-function run() {
+run() {
     local module="$1"
     shift
 
@@ -229,10 +229,10 @@ function run() {
     fi
 }
 
-function loop_modules() {
+loop_modules() {
     while read -r func; do
         export -f "$func"
-    done < <(sed -n 's/^function \(barnyard_.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard")
+    done < <(sed -n 's/^\(barnyard_.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard")
 
     export -f log abend
 
@@ -251,7 +251,7 @@ function loop_modules() {
     for module in "$@"; do run "$module"; done
 }
 
-function main() {
+main() {
     declare -A PRIORITY
 
     PRIORITY[panic]=0
@@ -348,7 +348,7 @@ exit
 
 ___ barnyard_run ___
 
-function main() {
+main() {
     declare -A PRIORITY o_barnyard o_module
     barnyard_read_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
     barnyard_read_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
