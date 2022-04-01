@@ -164,7 +164,7 @@ run() {
     o_module[_run]=once
     barnyard_read_config o_module "$configuration"
 
-    if [[ "${o_barnyard[stage]}" = production ]]; then
+    if [[ "${o_barnyard[stage]}" == production ]]; then
         if [[ -n "${o_module[_dependencies]}" ]]; then
             declare -a dependencies
             read -r -a dependencies <<< "${o_module[_dependencies]}"
@@ -181,7 +181,7 @@ run() {
 
     mkdir -p /var/barnyard/applied
 
-    if [[ "${o_barnyard[stage]}" = production ]]; then
+    if [[ "${o_barnyard[stage]}" == production ]]; then
         case "${o_module[_run]}" in
             once )
                 if [[ -e "/var/barnyard/applied/${module}" ]]; then
@@ -209,7 +209,7 @@ run() {
 
     mkdir -p "$BARNYARD_TEMP/runs/$module"
 
-    if [[ "${o_barnyard[stage]}" = production ]]; then
+    if [[ "${o_barnyard[stage]}" == production ]]; then
         ${o_registers[git]} archive "${o_registers[checkout]}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
     else
         cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
@@ -222,7 +222,7 @@ run() {
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
     o_barnyard[module]=''
 
-    if [[ "${o_barnyard[stage]}" = production ]]; then
+    if [[ "${o_barnyard[stage]}" == production ]]; then
         log module="$module" "marking module %s as applied" "${module}"
         ${o_registers[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/barnyard/applied/${module}"
     fi
