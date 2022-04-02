@@ -1,0 +1,174 @@
+# Since this is `zsh`, I'm not sure why we don't create an associative array
+# instead of writing all those varaibles, we would be less likely to leak
+# variables down the call stack and we could leak them if we so desired.
+
+# Oh, I know why. Because we generate arrays. Never mind.
+
+zsh_parse_arguments() {
+    local error=${${1:-}:q} context=${${2:-}:q}
+    shift 2
+
+    declare -A argument_properties
+
+    local regex short long kind variable default
+
+    while :
+    do
+        case "$1" in
+            --)
+                shift
+                break
+                ;;
+            *)
+                regex='^([a-zA-Z0-9]?),([^@:#]*)([@:#]?)(=.*)?$'
+                [[ "$1" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
+                short=${match[1]} long=${match[2]} kind=${match[3]} variable= default="${match[4]}"
+                [[ -z "$long" ]] && variable=o_$short || variable=o_$long
+                if [[ "$default" != '' ]]; then
+                    case x"$kind" in
+                        x )
+                            kind=flag
+                            [[ "${default:1}" =~ ^[0-1]$ ]] || { print -R "$error $context boolean ${1:q}" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x\! )
+                            kind=toggle
+                            [[ "${default:1}" =~ ^[0-1]$ ]] || { print -R "$error $context boolean ${1:q})" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x\# )
+                            kind=count
+                            [[ "${default:1}" =~ ^-?[0-9]+$ ]] || { print -R "$error $context integer ${1:q}" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x: )
+                            kind=value
+                            print -R "declare -a $variable=( ${default:1:q} )"
+                            ;;
+                        x@ )
+                            { print -R "$error $context no_defaults ${1:q}" && return; }
+                            ;;
+                    esac
+                else
+                    case x"$kind" in
+                        x )
+                            kind=flag
+                            print -R "local $variable=1"
+                            ;;
+                        x\! )
+                            kind=toggle
+                            print -R "local $variable=0"
+                            ;;
+                        x\# )
+                            kind=count
+                            print -R "local $variable=0"
+                            ;;
+                        x: )
+                            kind=value
+                            print -R "declare -a $variable"
+                            ;;
+                        x@ )
+                            kind=array
+                            print -R "declare -a $variable"
+                            ;;
+                    esac
+                fi
+                if [[ -n "$long" ]]; then
+                    argument_properties["--${long}"]="kind=$kind variable=$variable"
+                fi
+                if [[ -n "$short" ]]; then
+                    argument_properties["-${short}"]="kind=$kind variable=$variable"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # TODO Now we are swallowing the getopt error message. Maybe we need to
+    # implement this in Bash too?
+    declare -a args=( "$@" )
+    local i=1 arged flag
+    while [[ $i -le ${#args[@]} ]]
+    do
+        case "${args[$i]}" in
+            -- )
+                let i=i+1
+                break
+                ;;
+            --* )
+                arged=1
+                regex='^(--[a-zA-Z0-9]*)(=.*)?$'
+                [[ "${args[$i]}" =~ $regex ]] || { print -R "$error $context unknown ${1:q}"; return; }
+                long="${match[1]}"
+                if [[ "$match[2]" != '' ]]; then
+                    arged=0
+                    args[i]=${match[2]}
+                else
+                    let i=i+1
+                fi
+                flag=$long
+                [[ -z "${argument_properties["$long"]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
+                eval "${argument_properties["$long"]}"
+                if [[ $kind == toggle && "$long" =~ no- ]]; then
+                    print -R "$variable=0"
+                fi
+                ;;
+            -* )
+                short="${args[$i]}"
+                short="${short:0:2}"
+                flag=$short
+                [[ -z "${argument_properties["$short"]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
+                eval "${argument_properties["$short"]}"
+                case "$kind" in
+                    array | value )
+                        args[i]=${short:2}
+                        ;;
+                    * )
+                        # TODO If you have args a b and c and you get -abd what
+                        # does getopt do? Seems to just append...
+                        if [[ ${#args[i]} -gt 2 ]]; then
+                            args[i]="-${short:2}"
+                        else
+                            let i=i+1
+                        fi
+                        ;;
+                esac
+                ;;
+            *)
+                break
+                ;;
+        esac
+        case "$kind" in
+            flag | count | toggle )
+                [[ $arged -eq 0 ]] && { print -R "$error $context no_args ${flag:q}"; return; }
+                ;;
+        esac
+        case "$kind" in
+            flag )
+                print -R "$variable=0"
+                ;;
+            count )
+                print -R "let $variable=$variable+1"
+                ;;
+            toggle )
+                print -R "[[ \$$variable -eq 0 ]] && $variable=1 || variable=0"
+                ;;
+            value )
+                print -R "${variable}[0]=${args[$i]:q}"
+                let i=i+1
+                ;;
+            array )
+                print -R "${variable}[0]+=(${args[$i]:q})"
+                let i=i+1
+                ;;
+        esac
+    done
+
+    [[ $i -eq $(( ${#args[@]} + 1 )) ]] && print -R "set --" || print -R "set -- ${(@)args[$i,-1]:q}"
+}
+
+main() {
+    zsh_parse_arguments argbend 'a b c' ",long:" "s,:" "a,array@" "v,value:" "f,flag" "d,default:=a default value" -- "$@"
+}
+
+main "$@"
