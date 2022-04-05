@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=0.0.0
+VERSION=0.1.0
 
 # TODO Cannot remember all that I wanted to do with property names, but it seems
 # like all I need are the directives and based64 encoding. Maybe include is
@@ -181,20 +181,20 @@ run() {
 
     [[ -n "${seen[$module]}" ]] && return || seen["$module"]=0
 
-    mkdir -p /var/barnyard/applied
+    mkdir -p /var/lib/barnyard/applied
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         case "${o_module[_run]}" in
             once )
-                if [[ -e "/var/barnyard/applied/${module}" ]]; then
+                if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
                     log module="$module" "already applied module %s" "${module}"
                     return 0
                 fi
                 ;;
             diff )
-                if [[ -e "/var/barnyard/applied/${module}" ]]; then
+                if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
                     declare application
-                    read -r -a application < "/var/barnyard/applied/${module}"
+                    read -r -a application < "/var/lib/barnyard/applied/${module}"
                     if ${o_registers[git]} diff --quiet "${application[0]}"; then
                         log module="$module" "already applied module %s" "${module}"
                         return 0
@@ -226,7 +226,7 @@ run() {
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         log module="$module" "marking module %s as applied" "${module}"
-        ${o_registers[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/barnyard/applied/${module}"
+        ${o_registers[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/lib/barnyard/applied/${module}"
     fi
 }
 
@@ -237,7 +237,7 @@ loop_modules() {
 
     export -f log abend
 
-    mkdir -p "/var/barnyard/sha1"
+    mkdir -p "/var/lib/barnyard/sha1"
 
     barnyard_temporary_directory
 
@@ -279,7 +279,7 @@ main() {
     barnyard_read_config o_barnyard /etc/barnyard/config
 
     if [[ -z "${o_barnyard[barnyard]}" ]]; then
-        o_barnyard[barnyard]=/var/barnyard/repository
+        o_barnyard[barnyard]=/var/lib/barnyard/repository
     fi
 
     barnyard_parse_arguments o_registers "$@"
@@ -303,8 +303,8 @@ main() {
         ${o_registers[git]} pull -q origin "$branch"
         declare -a current
         local sha1
-        if [[ -e "/var/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
-            sha1=$(<"/var/barnyard/sha1/${o_barnyard[hostname]}")
+        if [[ -e "/var/lib/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
+            sha1=$(<"/var/lib/barnyard/sha1/${o_barnyard[hostname]}")
             IFS=' ' read -a current <<< "$(${o_registers[git]} log -n 1 --format='%H %at %GF' "$sha1")"
         fi
 
@@ -338,7 +338,7 @@ main() {
             mapfile -t modules <<< "$(ls "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}")"
             loop_modules "${modules[@]}"
 
-            echo "${checkout[0]}" > "/var/barnyard/sha1/${o_barnyard[hostname]}"
+            echo "${checkout[0]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
         fi
     fi
 }

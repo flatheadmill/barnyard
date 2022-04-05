@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION=0.0.0
+VERSION=0.1.0
 
 SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 
@@ -381,18 +381,19 @@ set -o pipefail
 
 force=$4
 
-if [[ ( -e /etc/barnyard || -e /var/barnyard ) && "$force" != 0 ]]; then
+if [[ ( -e /etc/barnyard || -e /var/lib/barnyard ) && "$force" != 0 ]]; then
     echo "error: Barnyard already installed, use \`--force\` to overwrite." 1>&2
     exit 1
 fi
 
 rm -f /usr/local/bin/barnyard
 rm -rf /etc/barnyard
-rm -rf /var/barnyard/repository
+rm -rf /var/barnyard/repository # legacy
+rm -rf /var/lib/barnyard/repository
 rm -rf /root/.ssh
 
 mkdir -p /etc/barnyard
-mkdir -p /var/barnyard
+mkdir -p /var/lib/barnyard
 
 while read -r key; do
     if [[ "$key" =~ ^pub: ]]; then
@@ -426,7 +427,7 @@ fingerprint=$fingerprint
 EOC
 
 mkdir -p /etc/barnyard
-mkdir -p /var/barnyard
+mkdir -p /var/lib/barnyard
 
 umask 077
 mkdir -p /root/.ssh
@@ -436,9 +437,9 @@ known_github="github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAA
 echo "$known_github" > /root/.ssh/known_hosts
 
 GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes' \
-    git clone -qb "$branch" "$repository" /var/barnyard/repository 2> /dev/null
+    git clone -qb "$branch" "$repository" /var/lib/barnyard/repository 2> /dev/null
 
-for key in $(find /var/barnyard/repository/public_keys -name \*.asc); do
+for key in $(find /var/lib/barnyard/repository/public_keys -name \*.asc); do
     gpg --import "$key" 2>/dev/null >/dev/null
 done
 
