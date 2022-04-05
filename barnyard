@@ -1,5 +1,7 @@
 #!/bin/bash
 
+VERSION=0.0.0
+
 # TODO Cannot remember all that I wanted to do with property names, but it seems
 # like all I need are the directives and based64 encoding. Maybe include is
 # something like `@/modules/postgresql/common`.
