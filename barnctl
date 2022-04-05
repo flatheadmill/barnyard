@@ -452,8 +452,28 @@ EOF
 ___ barnctl_update ___
 cat <<'EOF' | sudo bash -s "$BARNYARD_SOURCE"
 source="$1"
+if [[ -e /usr/local/bin/barnyard ]]; then
+    if ! grep -q '^VERSION=' /usr/local/bin/barnyard; then
+        version=0.0.0
+    else
+        version=$(grep '^VERSION=' /usr/local/bin/barnyard | sed 's/^VERSION=//')
+    fi
+    echo "######### old VERSION $version ##########"
+    case "$version" in
+        0.0.0 )
+            echo "######### apt-get install -y zsh ##########"
+            apt-get install -y zsh
+            if [[ ! -d /var/lib/barnyard && -d /var/barnyard ]]; then
+                echo "######### mv /var/barnyard /var/lib/barnyar ##########"
+                mv /var/barnyard /var/lib/barnyard
+            fi
+            ;& # fall through
+    esac
+fi
 rm -f /usr/local/bin/barnyard
 echo "$source" > /usr/local/bin/barnyard
 chmod +x /usr/local/bin/barnyard
+version=$(grep '^VERSION=' /usr/local/bin/barnyard | sed 's/^VERSION=//')
+echo "######### new VERSION $version ##########"
 EOF
 ___
