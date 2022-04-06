@@ -4,6 +4,9 @@ VERSION=0.1.0
 
 SCRIPT_DIR=${${0:a}%/*}
 
+___() {
+}
+
 zsh_parse_arguments() {
     local error=${${1:-}:q} context=${${2:-}:q}
     shift 2
@@ -194,6 +197,60 @@ barnctl_next_command() {
     done
 }
 
+___ barnctl_common ___
+
+barnctl_read_config_() {
+    local file=${2:-} regex='^([^=]+)=(.*)$' line
+    shift 2
+    while [[ $# -ne 0 ]]; do
+        barnctl_read_config[$1]=${2:-}
+        shift 2
+    done
+    while read -r line; do
+        [[ "$line" =~ $regex ]] || abend bad_config "$config"
+        local key=$match[1] value=$match[2]
+        barnctl_read_config[$key]="$value"
+    done < "$file"
+}
+
+barnctl_read_config() {
+    [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
+    declare -A barnctl_read_config
+    barnctl_read_config_ "$@"
+    : ${(PA)${1:-reply}::=${(@kv)barnctl_read_config}}
+}
+
+barnctl_quotedoc() {
+    local heredoc spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
+    declare -a lines
+    while read -r line; do
+        lines+=("$line")
+        if [[ "$line" =~ $leading ]]; then
+            if [[ "${#match[1]}" -lt "$spaces" ]]; then
+                spaces="${#match[1]}"
+            fi
+        else
+            echo miss
+        fi
+    done < /dev/stdin
+    read -r -d '' dedented < <(printf "%s\n" "${lines[@]}" | sed -E 's/^ {'$spaces'}//')
+    eval "$({
+        echo "cat <<EOF"
+        echo -n "$dedented"
+        echo "EOF"
+    })"
+}
+
+abend() {
+    barnctl_quotedoc < /dev/stdin 1>&2
+    exit 1
+}
+
+warn() {
+    barnctl_quotedoc < /dev/stdin 1>&2
+}
+___
+
 barnctl_shell_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
@@ -264,39 +321,38 @@ barnctl_command_prepare() {
     barnctl_shell_resource barnctl_prepare | ssh "$server" bash
 }
 
-barnctl_command_run() {
-    eval "$(barnctl_parse_arguments run "h,help" "u,user:" -- "$@")"
+barnctl_command_configure() {
+    eval "$(barnctl_parse_arguments apply "h,help" "u,user:" -- "$@")"
+    local hostname=${1:-}
+    shift
+    [[ -d age && -d machines && -d modules ]] || abend<<'    EOF'
+        error: barnyard utilties must be run in the barnyard directory
+    EOF
+    [[ -d "machines/$hostname" ]] || abend<<'    EOF'
+        error: hostname configuration not found
+    EOF
+    declare -a modules
+    if [[ $# -eq 0 ]]; then
+        for module in machines/$hostname/*; do
+            modules+=(${module##*/})
+        done
+    else
+        modules=("$@")
+    fi
+    for module in "${modules[@]}"; do
+        if [[ -e modules/$module/configure.zsh ]]; then
+            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module
+        fi
+    done
+}
+
+barnctl_command_apply() {
+    eval "$(barnctl_parse_arguments apply "h,help" "u,user:" -- "$@")"
     ssh "$(_barnctl_get_server "$@" "${o_user[1]}")" sudo /usr/local/bin/barnyard
 }
 
 acrectl_string_resource() {
     awk '/^# ___ '$1' ___/{flag=1;next}/^# ___/{flag=0}flag' "$SCRIPT_DIR/barnctl" | sed -E 's/^# ?//g'
-}
-
-abend() {
-    acrectl_quotedoc < /dev/stdin 1>&2
-    exit 1
-}
-
-barnctl_quotedoc() {
-    local heredoc spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
-    declare -a lines
-    while read -r line; do
-        lines+=("$line")
-        if [[ "$line" =~ $leading ]]; then
-            if [[ "${#BASH_REMATCH[1]}" -lt "$spaces" ]]; then
-                spaces="${#BASH_REMATCH[1]}"
-            fi
-        else
-            echo miss
-        fi
-    done < /dev/stdin
-    read -r -d '' dedented < <(printf "%s\n" "${lines[@]}" | sed -E 's/^ {'$spaces'}//')
-    eval "$({
-        echo "cat <<EOF"
-        echo -n "$dedented"
-        echo "EOF"
-    })"
 }
 
 barnctl_command_arguments() {
@@ -443,4 +499,20 @@ chmod +x /usr/local/bin/barnyard
 version=$(grep '^VERSION=' /usr/local/bin/barnyard | sed 's/^VERSION=//')
 echo "######### new VERSION $version ##########"
 EOF
+___ barnctl_configure ___
+
+source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barnctl")
+
+shift
+
+main() {
+    declare -A o_barnyard o_module
+    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${3:-} o_barnyard[force]=1
+    shift 3
+    barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
+    echo barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
+    source "${o_barnyard[barnyard]}/modules/${o_barnyard[module]}/configure.zsh"
+}
+
+main "$@"
 ___
