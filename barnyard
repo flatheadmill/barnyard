@@ -1,69 +1,81 @@
-#!/bin/bash
+#!/usr/bin/env zsh
 
 VERSION=0.1.0
+
+___() {
+}
 
 # TODO Cannot remember all that I wanted to do with property names, but it seems
 # like all I need are the directives and based64 encoding. Maybe include is
 # something like `@/modules/postgresql/common`.
-SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+SCRIPT_DIR=${${0:a}%/*}
+
+___ barnyard_common ___
 
 barnyard_bash_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnyard"
 }
 
 barnyard_cleanup() {
-    rm -rf "$BARNYARD_TEMP"
+    [[ -n "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
 }
 
 barnyard_temporary_directory() {
     [[ -n "$BARNYARD_TEMP" ]] && return
     BARNYARD_TEMP="$(mktemp -d)"
     export BARNYARD_TEMP
-    trap barnyard_cleanup EXIT
 }
 
-barnyard_join_by() {
-    local d=${1-} f=${2-}
-    if shift 2; then
-        printf %s "$f" "${@/#/$d}"
-    fi
-}
+trap barnyard_cleanup EXIT
 
 barnyard_write_config() {
-    declare -n __map="$1"
-    local file="$2"
-    shift 2
+    local map=${1:-} file=${2:-}
     declare -a fields
-    for key in "${!__map[@]}"; do
-        fields+=("${key}=${__map[$key]}")
+    for key value in "${(@kv)${(P)map}}"; do
+        fields+=("${key}=${value}")
     done
-    barnyard_join_by $'\n' "${fields[@]}" > "$file"
+    print "${(j:\n:)fields}" > "$file"
+}
+
+barnyard_read_config_() {
+    local file=${2:-} regex='^([^=]+)=(.*)$' line
+    shift 2
+    while [[ $# -ne 0 ]]; do
+        barnyard_read_config[$1]=${2:-}
+        shift 2
+    done
+    while read -r line; do
+        [[ "$line" =~ $regex ]] || abend bad_config "$config"
+        local key=$match[1] value=$match[2]
+        barnyard_read_config[$key]="$value"
+    done < "$file"
 }
 
 barnyard_read_config() {
-    declare -n __array="$1"
-    local config=$2 regex='^([^=]+)=(.*)$'
-    while read -r line; do
-        [[ "$line" =~ $regex ]] || abend bad_config "$config"
-        local name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
-        __array["$name"]="$value"
-    done < "$config"
+    [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
+    declare -A barnyard_read_config
+    barnyard_read_config_ "$@"
+    : ${(PA)${1:-reply}::=${(@kv)barnyard_read_config}}
 }
 
-barnyard_parse_arguments() {
-    declare -n __array="$1"
+barnyard_parse_arguments_() {
     shift
     local regex='^([^=]+)=(.*)$'
     while [[ $# -ne 0 ]]; do
         [[ "$1" =~ $regex ]] || abend bad_argument "$1"
         shift
-        local name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
-        __array["$name"]="$value"
+        barnyard_parse_arguments+=("$match[1]" "$match[2]")
     done
 }
 
+barnyard_parse_arguments() {
+    declare -a barnyard_parse_arguments
+    barnyard_parse_arguments_ "$@"
+    : ${(PA)${1:-reply}::=${(@kv)barnyard_parse_arguments}}
+}
+
 abend() {
-    log priority=3 "$@"
+    log priority=err "$@"
     exit 1
 }
 
@@ -71,7 +83,6 @@ log() {
     SALT=a5bbeb04f50fcdee70b0b5976438a8d8
 
     _log() {
-
         local priority
         if [[ -z "${PRIORITY["$1"]}" ]]; then
             priority=info
@@ -84,8 +95,8 @@ log() {
         local name value regex='^([^=]+)=(.*)$'
         while true; do
             if [[ "$1" =~ $regex ]]; then
-                name="${BASH_REMATCH[1]}" value="${BASH_REMATCH[2]}"
-                journald+=("${name^^}=${value}")
+                name="${match[1]}" value="${match[2]}"
+                journald+=("${name:u}=${value}")
                 syslog+=("${name}=${value}")
                 if [[ "$name" == priority ]]; then
                     priority=$value
@@ -95,6 +106,8 @@ log() {
                 break
             fi
         done
+
+        priority=$PRIORITY[$priority]
 
         if [[ "$priority" -gt "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]]; then
             return
@@ -106,7 +119,7 @@ log() {
 
         local context=''
         if [[ ${#syslog[@]} -ne 0 ]]; then
-            context="; $(barnyard_join_by ', ' "${syslog[@]}")"
+            context="; ${(j:, :)syslog}"
         fi
 
         echo "$(date --rfc-3339=s | sed 's/+.*//') barnyard[info]: $message$context"
@@ -114,9 +127,10 @@ log() {
         local id
         id=$(echo "$SALT" "$format" | md5sum | cut -d' ' -f1)
 
-        journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=${PRIORITY[$priority]} SYSLOG_FACILITY=1)
-        echo "$(barnyard_join_by $'\n' "${journald[@]}")" | logger --journald
+        journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=$priority SYSLOG_FACILITY=1)
+        print "${(j:\n:)journald}" | logger --journald
     }
+
     local module
     if [[ -n "${o_barnyard[module]}" ]]; then
         _log module="${o_barnyard[module]}" "$@"
@@ -156,6 +170,8 @@ barnyard_quotedoc() {
     })"
 }
 
+___
+
 run() {
     local module="$1"
     shift
@@ -163,8 +179,7 @@ run() {
     local configuration="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
     [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
     declare -A o_module
-    o_module[_run]=once
-    barnyard_read_config o_module "$configuration"
+    barnyard_read_config o_module "$configuration" _run once
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         if [[ -n "${o_module[_dependencies]}" ]]; then
@@ -179,7 +194,7 @@ run() {
         fi
     fi
 
-    [[ -n "${seen[$module]}" ]] && return || seen["$module"]=0
+    [[ -n "${seen[$module]}" ]] && return || seen[$module]=0
 
     mkdir -p /var/lib/barnyard/applied
 
@@ -195,15 +210,15 @@ run() {
                 if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
                     declare application
                     read -r -a application < "/var/lib/barnyard/applied/${module}"
-                    if ${o_registers[git]} diff --quiet "${application[0]}"; then
+                    if git -C "${o_barnyard[barnyard]}" diff --quiet "${application[0]}"; then
                         log module="$module" "already applied module %s" "${module}"
                         return 0
                     fi
                     log module="$module" "module %s has changed, re-applying" "${module}"
                 fi
                 ;;
-            explicit )
-                log module="$module" "module % run set to explicit, skipping" "${module}"
+            never )
+                log module="$module" "module % run set to never, skipping" "${module}"
                 return 0
                 ;;
         esac
@@ -212,31 +227,26 @@ run() {
     mkdir -p "$BARNYARD_TEMP/runs/$module"
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
-        ${o_registers[git]} archive "${o_registers[checkout]}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
+        git -C "${o_barnyard[barnyard]}" archive "${o_registers[checkout]}" modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
     else
         cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
     fi
 
     o_barnyard[module]="$module"
+    local foo=o_barnyard
     barnyard_write_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
-    bash "$BARNYARD_TEMP/barnyard/run"
+    zsh "$BARNYARD_TEMP/barnyard/run" "$SCRIPT_DIR/barnyard"
     local code=$?
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
     o_barnyard[module]=''
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         log module="$module" "marking module %s as applied" "${module}"
-        ${o_registers[git]} log -n 1 --format='%H %at %GF' "${checkout}" > "/var/lib/barnyard/applied/${module}"
+        git -C "${o_barnyard[barnyard]}" log -n 1 --format='%H %at %GF' "${checkout}" > "/var/lib/barnyard/applied/${module}"
     fi
 }
 
 loop_modules() {
-    while read -r func; do
-        export -f "$func"
-    done < <(sed -n 's/^\(barnyard_.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard")
-
-    export -f log abend
-
     mkdir -p "/var/lib/barnyard/sha1"
 
     barnyard_temporary_directory
@@ -274,9 +284,7 @@ main() {
     export BARNYARD_LOG_LEVEL
 
     declare -A o_barnyard o_registers
-
-    o_barnyard[hostname]=$(hostname --long)
-    barnyard_read_config o_barnyard /etc/barnyard/config
+    barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)"
 
     if [[ -z "${o_barnyard[barnyard]}" ]]; then
         o_barnyard[barnyard]=/var/lib/barnyard/repository
@@ -284,28 +292,27 @@ main() {
 
     barnyard_parse_arguments o_registers "$@"
 
-    if [[ -n "${o_registers[develop]}" || -n "${o_registers[modules]}" ]]; then
+    if [[ -n "$o_registers[develop]" || -n "$o_registers[modules]" ]]; then
         [[ -n "$SUDO_USER" ]] || abend must_run_develop_through_sudo
-        [[ -n "${o_registers[develop]}" ]] && o_barnyard[barnyard]="$(readlink -f "${o_registers[develop]}")"
+        [[ -n "$o_registers[develop]" ]] && o_barnyard[barnyard]="$(readlink -f "${o_registers[develop]}")"
         [[ -n "${o_registers[modules]}" ]] || o_register[modules]=''
         [[ -e "${o_barnyard[barnyard]}" ]] || abend barnyard_does_not_exist "${o_barnyard[barnyard]}"
         [[ $(stat -c '%U' "${o_barnyard[barnyard]}/.git/index") == $SUDO_USER ]] || \
             abend sudo_user_does_not_own "$SUDO_USER" "${o_barnyard[barnyard]}"
         declare -a modules
         o_registers[git]="sudo -u $SUDO_USER git -C $(printf %q ${o_barnyard[barnyard]})"
-        IFS=' ' read -a modules <<< "${o_registers[modules]}"
+        IFS=' ' read -A modules <<< "${o_registers[modules]}"
         o_barnyard[stage]=development
         loop_modules "${modules[@]}"
     else
-        export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes'
         o_registers[git]="git -C $(printf %q ${o_barnyard[barnyard]})"
-        ${o_registers[git]} checkout -q "${o_barnyard[branch]}"
-        ${o_registers[git]} pull -q origin "$branch"
+        git -C "${o_barnyard[barnyard]}" checkout -q "${o_barnyard[branch]}"
+        git -C "${o_barnyard[barnyard]}" pull -q origin "$branch"
         declare -a current
         local sha1
         if [[ -e "/var/lib/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
             sha1=$(<"/var/lib/barnyard/sha1/${o_barnyard[hostname]}")
-            IFS=' ' read -a current <<< "$(${o_registers[git]} log -n 1 --format='%H %at %GF' "$sha1")"
+            IFS=' ' read -a current <<< "$(git -C ${o_barnyard[barnyard]} log -n 1 --format='%H %at %GF' "$sha1")"
         fi
 
         if [[ "${#current[@]}" -eq 0 ]]; then
@@ -315,7 +322,7 @@ main() {
                     checkout=("${fields[@]}")
                     break
                 fi
-            done < <(${o_registers[git]} log --format='%H %at %GF')
+            done < <(git -C "${o_barnyard[barnyard]}" log --format='%H %at %GF')
         else
             while read -r line; do
                 IFS=' ' read -a fields <<< "$line"
@@ -326,7 +333,7 @@ main() {
                 if [[ "${fields[0]}" == "${current[0]}" ]]; then
                     break
                 fi
-            done < <(${o_registers[git]} log --format='%H %at %GF')
+            done < <(git -C "${o_barnyard[barnyard]}" log --format='%H %at %GF')
         fi
 
         # https://stackoverflow.com/a/21941473
@@ -348,14 +355,14 @@ main "$@"
 exit
 
 ___ barnyard_run ___
-
 main() {
+    source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$1")
     declare -A PRIORITY o_barnyard o_module
     barnyard_read_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
     barnyard_read_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
     barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    . "$BARNYARD_TEMP/runs/${o_barnyard[module]}/modules/${o_barnyard[module]}/apply.bash"
+    . "$BARNYARD_TEMP/runs/${o_barnyard[module]}/modules/${o_barnyard[module]}/apply.zsh"
 }
 
-main
+main "$@"
 ___
