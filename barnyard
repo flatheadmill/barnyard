@@ -176,8 +176,6 @@ run() {
     local module="$1"
     shift
 
-    echo running $module
-
     local configuration="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
     [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
     declare -A o_module
