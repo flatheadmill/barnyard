@@ -1,19 +1,207 @@
-#!/bin/bash
+#!/usr/bin/env zsh
 
 VERSION=0.1.0
 
-SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+SCRIPT_DIR=${${0:a}%/*}
 
-barnctl_bash_resource() {
+zsh_parse_arguments() {
+    local error=${${1:-}:q} context=${${2:-}:q}
+    shift 2
+
+    declare -A argument_properties
+
+    local regex short long kind variable default
+
+    while :
+    do
+        case "$1" in
+            --)
+                shift
+                break
+                ;;
+            *)
+                regex='^([a-zA-Z0-9]?),([^@:#]*)([@:#]?)(=.*)?$'
+                [[ "$1" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
+                short=${match[1]} long=${match[2]} kind=${match[3]} variable= default="${match[4]}"
+                [[ -z "$long" ]] && variable=o_$short || variable=o_$long
+                if [[ "$default" != '' ]]; then
+                    case x"$kind" in
+                        x )
+                            kind=flag
+                            [[ "${default:1}" =~ ^[0-1]$ ]] || { print -R "$error $context boolean ${1:q}" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x\! )
+                            kind=toggle
+                            [[ "${default:1}" =~ ^[0-1]$ ]] || { print -R "$error $context boolean ${1:q})" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x\# )
+                            kind=count
+                            [[ "${default:1}" =~ ^-?[0-9]+$ ]] || { print -R "$error $context integer ${1:q}" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x: )
+                            kind=value
+                            print -R "declare -a $variable=( ${default:1:q} )"
+                            ;;
+                        x@ )
+                            { print -R "$error $context no_defaults ${1:q}" && return; }
+                            ;;
+                    esac
+                else
+                    case x"$kind" in
+                        x )
+                            kind=flag
+                            print -R "local $variable=1"
+                            ;;
+                        x\! )
+                            kind=toggle
+                            print -R "local $variable=0"
+                            ;;
+                        x\# )
+                            kind=count
+                            print -R "local $variable=0"
+                            ;;
+                        x: )
+                            kind=value
+                            print -R "declare -a $variable"
+                            ;;
+                        x@ )
+                            kind=array
+                            print -R "declare -a $variable"
+                            ;;
+                    esac
+                fi
+                if [[ -n "$long" ]]; then
+                    argument_properties["--${long}"]="kind=$kind variable=$variable"
+                fi
+                if [[ -n "$short" ]]; then
+                    argument_properties["-${short}"]="kind=$kind variable=$variable"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    declare -a args=( "$@" )
+    local i=1 arged flag
+    while [[ $i -le ${#args[@]} ]]
+    do
+        case "${args[$i]}" in
+            -- )
+                let i=i+1
+                break
+                ;;
+            --* )
+                arged=1
+                regex='^(--[a-zA-Z0-9]*)(=.*)?$'
+                [[ "${args[$i]}" =~ $regex ]] || { print -R "$error $context unknown ${1:q}"; return; }
+                long="${match[1]}"
+                if [[ "$match[2]" != '' ]]; then
+                    arged=0
+                    args[i]=${match[2]:1}
+                else
+                    let i=i+1
+                fi
+                flag=$long
+                [[ -z "${argument_properties["$long"]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
+                eval "${argument_properties["$long"]}"
+                if [[ $kind == toggle && "$long" =~ no- ]]; then
+                    print -R "$variable=0"
+                fi
+                ;;
+            -* )
+                short="${args[$i]}"
+                short="${short:0:2}"
+                flag=$short
+                [[ -z "${argument_properties["$short"]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
+                eval "${argument_properties["$short"]}"
+                case "$kind" in
+                    array | value )
+                        if [[ ${#short} -eq 2 ]]; then
+                            let i=i+1
+                        else
+                            args[i]=${short:2}
+                        fi
+                        ;;
+                    * )
+                        # TODO If you have args a b and c and you get -abd what
+                        # does getopt do? Seems to just append...
+                        if [[ ${#args[i]} -gt 2 ]]; then
+                            args[i]="-${short:2}"
+                        else
+                            let i=i+1
+                        fi
+                        ;;
+                esac
+                ;;
+            *)
+                break
+                ;;
+        esac
+        case "$kind" in
+            flag | count | toggle )
+                [[ $arged -eq 0 ]] && { print -R "$error $context no_args ${flag:q}"; return; }
+                ;;
+        esac
+        case "$kind" in
+            flag )
+                print -R "$variable=0"
+                ;;
+            count )
+                print -R "let $variable=$variable+1"
+                ;;
+            toggle )
+                print -R "[[ \$$variable -eq 0 ]] && $variable=1 || variable=0"
+                ;;
+            value )
+                print -R "${variable}[1]=${args[$i]:q}"
+                let i=i+1
+                ;;
+            array )
+                print -R "${variable}+=(${args[$i]:q})"
+                let i=i+1
+                ;;
+        esac
+    done
+
+    [[ $i -eq $(( ${#args[@]} + 1 )) ]] && print -R "set --" || print -R "set -- ${(@)args[$i,-1]:q}"
+}
+
+acrectl_parse_arguments_error() {
+    print -R -u 2 "@"
+    exit 1
+}
+
+barnctl_parse_arguments() {
+    zsh_parse_arguments barnctl_argument_error "$@"
+    echo "[[ \$o_help -eq 0 ]] && usage_$1"
+}
+
+IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
+    sed -n 's/^barnctl_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnctl" \
+)
+
+barnctl_next_command() {
+    local prefix=$1 command=$2
+    shift 2
+    for func in "${BARNCTL_COMMANDS[@]}"; do
+        if [[ "$func" == "$prefix$command" ]]; then
+            "barnctl_command_$func" "$@"
+            break
+        fi
+    done
+}
+
+barnctl_shell_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
 
 _barnctl_get_server() {
     local server="$1" user="$2"
-    if [[ -z "$user" ]]; then
-        echo "$server"
-    fi
-    echo "$user@$server"
+    [[ -z "$user" ]] && print -R "$server"
+    print -R "$user@$server"
 }
 
 barnctl_command_bootstrap() {
@@ -25,10 +213,7 @@ barnctl_command_bootstrap() {
         "b,branch:" "r,repository:" \
         -- "$@")"
 
-    local server=${1:-}
-    if [[ ${#o_user[@]} -ne 0 ]]; then
-        server="${o_user[0]}@$server"
-    fi
+    local server="$(_barnctl_get_server "$@" "${o_user[1]}")"
 
 #    local gpg_key=$(<"$o_gpg")
 
@@ -47,8 +232,7 @@ barnctl_command_bootstrap() {
         cat "$o_github"
         echo 'EOF'
         echo '))'
-        echo ''
-        barnctl_bash_resource barnctl_bootstrap
+        barnctl_shell_resource barnctl_bootstrap
     }
 
     # https://unix.stackexchange.com/a/414640
@@ -58,11 +242,6 @@ barnctl_command_bootstrap() {
 barnctl_command_update() {
     eval "$(barnctl_parse_arguments update "h,help" "u,user:" -- "$@")"
 
-    local server=${1:-}
-    if [[ ${#o_user[@]} -ne 0 ]]; then
-        server="${o_user[0]}@$server"
-    fi
-
     _compile_script() {
         # TODO Why two forms of substitution?
         echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
@@ -70,33 +249,24 @@ barnctl_command_update() {
         echo 'EOF'
         echo '))'
         echo ''
-        barnctl_bash_resource barnctl_update
+        barnctl_shell_resource barnctl_update
     }
 
-    _compile_script | ssh "$server" bash
+    _compile_script | ssh "$(_barnctl_get_server "$@" "${o_user[1]}")" bash
 }
 
 barnctl_command_prepare() {
     eval "$(barnctl_parse_arguments prepare "h,help" "u,user:" -- "$@")"
     local server=${1:-}
     if [[ ${#o_user[@]} -ne 0 ]]; then
-        server="${o_user[0]}@$server"
+        server="${o_user[1]}@$server"
     fi
-    barnctl_bash_resource barnctl_prepare | ssh "$server" bash
+    barnctl_shell_resource barnctl_prepare | ssh "$server" bash
 }
 
 barnctl_command_run() {
     eval "$(barnctl_parse_arguments run "h,help" "u,user:" -- "$@")"
-    ssh "$(_barnctl_get_server "$@" "${o_user[0]}")" sudo /usr/local/bin/barnyard
-}
-
-# TODO Outgoing.
-barnctl_command_develop() {
-    eval "$(barnctl_parse_arguments develop "h,help" -- "$@")"
-    local directory
-    [[ $# -ne 0 ]] || abend develop_directory_required
-    directory=${o_argv[0]}
-    [[ -d "$directory" ]] || abend develop_not_a_directory "$directory"
+    ssh "$(_barnctl_get_server "$@" "${o_user[1]}")" sudo /usr/local/bin/barnyard
 }
 
 acrectl_string_resource() {
@@ -133,209 +303,6 @@ barnctl_command_arguments() {
     barnctl_parse_arguments arguments ",long:" "s,:" "a,array@" "v,value:" "f,flag" -- "$@"
 }
 
-barnctl_argument_error() {
-    echo "$@"
-    exit 1
-}
-
-bash_parse_arguments() {
-    local error=$(printf %q "$1") context=$(printf %q "$2")
-    shift 2
-
-    declare -a argument_lookup
-    declare -a argument_properties
-
-    local regex short long kind variable default
-
-    while :
-    do
-        case "$1" in
-            --)
-                shift
-                break
-                ;;
-            *)
-                regex='^([a-zA-Z0-9]?),([^@:#]*)([@:#]?)(=.*)?$'
-                # TODO Eval arguments instead.
-                [[ "$1" =~ $regex ]] || { echo bad_parameter_argument "$1"; return; }
-                short=${BASH_REMATCH[1]} long=${BASH_REMATCH[2]} kind=${BASH_REMATCH[3]} variable= default="${BASH_REMATCH[4]}"
-                [[ -z "$long" ]] && variable=o_$short || variable=o_$long
-                if [[ "$default" != '' ]]; then
-                    case x"$kind" in
-                        x )
-                            kind=flag
-                            [[ "${default:1}" =~ ^[0-1]$ ]] || { echo "$error $context boolean $(printf %q "$1")" && return; }
-                            echo "local $variable=${default:1}"
-                            ;;
-                        x\! )
-                            kind=toggle
-                            [[ "${default:1}" =~ ^[0-1]$ ]] || { echo "$error $context boolean $(printf %q "$1")" && return; }
-                            echo "local $variable=${default:1}"
-                            ;;
-                        x\# )
-                            kind=count
-                            [[ "${default:1}" =~ ^-?[0-9]+$ ]] || { echo "$error $context integer $(printf %q "$1")" && return; }
-                            echo "local $variable=${default:1}"
-                            ;;
-                        x: )
-                            kind=value
-                            echo "declare -a $variable=( $(printf %q "${default:1}") )"
-                            ;;
-                        x@ )
-                            { echo "$error $context no_defaults $(printf %q "$1")" && return; }
-                            ;;
-                    esac
-                else
-                    case x"$kind" in
-                        x )
-                            kind=flag
-                            echo "local $variable=1"
-                            ;;
-                        x\! )
-                            kind=toggle
-                            echo "local $variable=0"
-                            ;;
-                        x\# )
-                            kind=count
-                            echo "local $variable=0"
-                            ;;
-                        x: )
-                            kind=value
-                            echo "declare -a $variable"
-                            ;;
-                        x@ )
-                            kind=array
-                            echo "declare -a $variable"
-                            ;;
-                    esac
-                fi
-                argument_eval="kind=$kind variable=$variable"
-                if [[ -n "$long" ]]; then
-                    argument_lookup+=("--${long}")
-                    argument_properties+=("$argument_eval")
-                fi
-                if [[ -n "$short" ]]; then
-                    argument_lookup+=("-${short}")
-                    argument_properties+=("$argument_eval")
-                fi
-                shift
-                ;;
-        esac
-    done
-
-    # TODO What does getopt think of `-`?
-    declare -a args=( "$@" )
-    local i=0 j arged flag
-    while [[ $i -lt ${#args[@]} ]]
-    do
-        arged=1
-        case "${args[$i]}" in
-            -- )
-                let i=i+1
-                break
-                ;;
-            --* )
-                regex='^(--[a-zA-Z0-9]*)(=.*)?$'
-                [[ "${args[$i]}" =~ $regex ]] || { echo "$error $context unknown $(printf %q "$1")"; return; }
-                long="${BASH_REMATCH[1]}"
-                if [[ -z "${BASH_REMATCH[2]}" ]]; then
-                    let i=i+1
-                else
-                    arged=0
-                    args[i]=${BASH_REMATCH[2]}
-                fi
-                flag="$long"
-                for (( j=0; j<${#argument_lookup[@]}; j++ )); do
-                    [[ ${argument_lookup[$j]} == "$long" ]] && break
-                done
-                if [[ $j -eq ${#argument_lookup[@]} ]]; then
-                    echo "$error unknown $(printf %q "$long")"
-                    break
-                fi
-                eval "${argument_properties[$j]}"
-                if [[ $kind == toggle && "$long" =~ no- ]]; then
-                    echo "$variable=0"
-                fi
-                ;;
-            -* )
-                short="${args[$i]}"
-                short="${short:0:2}"
-                flag="$short"
-                for (( j=0; j<${#argument_lookup[@]}; j++ )); do
-                    [[ ${argument_lookup[$j]} == "$short" ]] && break
-                done
-                if [[ $j -eq ${#argument_lookup[@]} ]]; then
-                    { echo "$error $context unknown $(printf %q "$short")"; return; }
-                fi
-                eval "${argument_properties[$j]}"
-                case "$kind" in
-                    array | value )
-                        args[i]=${short:2}
-                        ;;
-                    * )
-                        # TODO If you have args a b and c and you get -abd what
-                        # does getopt do? Seems to just append...
-                        if [[ ${#args[i]} -gt 2 ]]; then
-                            args[i]="-${short:2}"
-                        else
-                            let i=i+1
-                        fi
-                        ;;
-                esac
-                ;;
-            *)
-                break
-                ;;
-        esac
-        case "$kind" in
-            flag | count | toggle )
-                [[ $arged -eq 0 ]] && { echo "$error $context no_args $(printf %q "$flag")"; return; }
-                ;;
-        esac
-        case "$kind" in
-            flag )
-                echo "$variable=0"
-                ;;
-            count )
-                echo "let $variable=$variable+1"
-                ;;
-            toggle )
-                echo "[[ \$$variable -eq 0 ]] && $variable=1 || variable=0"
-                ;;
-            value )
-                echo "$variable[0]=$(printf %q "${args[$i]}")"
-                let i=i+1
-                ;;
-            array )
-                echo "$variable[0]+=($(printf %q "${args[$i]}"))"
-                let i=i+1
-                ;;
-        esac
-    done
-
-    [[ $i -eq ${#args[@]} ]] && echo "set --" || echo "set --$(printf ' %q' "${args[@]:$i}")"
-}
-
-barnctl_parse_arguments() {
-    bash_parse_arguments barnctl_argument_error "$@"
-    echo "[[ \$o_help -eq 0 ]] && usage_$1"
-}
-
-IFS=$'\n' read -d '' -r -a BARNCTL_COMMANDS < <( \
-    sed -n 's/^barnctl_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnctl" \
-)
-
-barnctl_next_command() {
-    local prefix=$1 command=$2
-    shift 2
-    for func in "${BARNCTL_COMMANDS[@]}"; do
-        if [[ "$func" == "$prefix$command" ]]; then
-            "barnctl_command_$func" "$@"
-            break
-        fi
-    done
-}
-
 main() {
     eval "$(barnctl_parse_arguments root "h,help" -- "$@")"
     barnctl_next_command "" "$@"
@@ -349,8 +316,8 @@ ___ barnctl_prepare ___
 cat <<'EOF' | sudo bash
 echo '######### apt update ##########'
 apt-get update && apt-get upgrade -y && apt-get -y autoremove
-echo '######### install gnupg2, git ##########'
-apt-get install -y gnupg2 git
+echo '######### install zsh, gnupg2, git ##########'
+apt-get install -y zsh gnupg2 git
 echo '######### check gpg ##########'
 gpg --version
 echo '######### check git ##########'

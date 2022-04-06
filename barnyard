@@ -305,19 +305,21 @@ main() {
         o_barnyard[stage]=development
         loop_modules "${modules[@]}"
     else
+        export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes'
         o_registers[git]="git -C $(printf %q ${o_barnyard[barnyard]})"
         git -C "${o_barnyard[barnyard]}" checkout -q "${o_barnyard[branch]}"
         git -C "${o_barnyard[barnyard]}" pull -q origin "$branch"
+        exit
         declare -a current
         local sha1
         if [[ -e "/var/lib/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
             sha1=$(<"/var/lib/barnyard/sha1/${o_barnyard[hostname]}")
-            IFS=' ' read -a current <<< "$(git -C ${o_barnyard[barnyard]} log -n 1 --format='%H %at %GF' "$sha1")"
+            IFS=' ' read -A current <<< "$(git -C ${o_barnyard[barnyard]} log -n 1 --format='%H %at %GF' "$sha1")"
         fi
 
         if [[ "${#current[@]}" -eq 0 ]]; then
             while read -r line; do
-                IFS=' ' read -a fields <<< "$line"
+                IFS=' ' read -A fields <<< "$line"
                 if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" ]]; then
                     checkout=("${fields[@]}")
                     break
@@ -325,7 +327,7 @@ main() {
             done < <(git -C "${o_barnyard[barnyard]}" log --format='%H %at %GF')
         else
             while read -r line; do
-                IFS=' ' read -a fields <<< "$line"
+                IFS=' ' read -A fields <<< "$line"
                 if [[ "${fields[2]}" == "${o_barnyard[fingerprint]}" && ${fields[1]} -gt ${current[1]} ]]; then
                     checkout=("${fields[@]}")
                     break
@@ -343,6 +345,7 @@ main() {
 
             declare -a modules
             mapfile -t modules <<< "$(ls "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}")"
+
             loop_modules "${modules[@]}"
 
             echo "${checkout[0]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
