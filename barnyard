@@ -367,6 +367,7 @@ main() {
     barnyard_read_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
     barnyard_read_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
     barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
+    o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
     . "$BARNYARD_TEMP/runs/${o_barnyard[module]}/modules/${o_barnyard[module]}/apply.zsh"
 }
 
