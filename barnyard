@@ -179,7 +179,7 @@ run() {
     local configuration="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
     [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
     declare -A o_module
-    barnyard_read_config o_module "$configuration" _run once
+    barnyard_read_config o_module "$configuration" _apply once
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         if [[ -n "${o_module[_dependencies]}" ]]; then
@@ -199,7 +199,7 @@ run() {
     mkdir -p /var/lib/barnyard/applied
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
-        case "${o_module[_run]}" in
+        case "${o_module[_apply]}" in
             once )
                 if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
                     log module="$module" "already applied module %s" "${module}"
