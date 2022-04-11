@@ -331,7 +331,7 @@ barnctl_command_prepare() {
 }
 
 barnctl_command_configure() {
-    eval "$(barnctl_parse_arguments apply "h,help" "u,user:" -- "$@")"
+    eval "$(barnctl_parse_arguments apply "h,help" "f,force" -- "$@")"
     local hostname=${1:-}
     shift
     [[ -d age && -d machines && -d modules ]] || abend<<'    EOF'
@@ -350,7 +350,7 @@ barnctl_command_configure() {
     fi
     for module in "${modules[@]}"; do
         if [[ -e modules/$module/configure.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module
+            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module $o_force
         fi
     done
 }
@@ -516,7 +516,7 @@ shift
 
 main() {
     declare -A o_barnyard o_module
-    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${3:-} o_barnyard[force]=1
+    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${3:-} o_barnyard[force]=${4:-}
     shift 3
     o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
