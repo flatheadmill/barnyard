@@ -176,7 +176,7 @@ run() {
     local module="$1"
     shift
 
-    local configuration="${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
+    local configuration="${o_registers[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
     [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
     declare -A o_module
     barnyard_read_config o_module "$configuration" _apply once
@@ -210,7 +210,7 @@ run() {
                 if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
                     declare application
                     read -r -A application < "/var/lib/barnyard/applied/${module}"
-                    if git -C "${o_barnyard[barnyard]}" diff --quiet "${application[1]}"; then
+                    if git -C "${o_registers[barnyard]}" diff --quiet "${application[1]}"; then
                         log module="$module" "already applied module %s" "${module}"
                         return 0
                     fi
@@ -231,9 +231,11 @@ run() {
     o_barnyard[tmp]="$BARNYARD_TEMP/tmp"
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
-        git -C "${o_barnyard[barnyard]}" archive "${o_registers[checkout]}" -- modules | tar -C "$BARNYARD_TEMP/runs/$module" -x
+        git -C "${o_registers[barnyard]}" archive "${o_registers[checkout]}" | tar -C "$BARNYARD_TEMP/runs/$module" -x
+        o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$module"
+        find "$BARNYARD_TEMP/runs/$module/resources/${o_barnyard[hostname]}"
     else
-        cp -R "${o_barnyard[barnyard]}/modules" "$BARNYARD_TEMP/runs/$module"
+        cp -R "${o_registers[barnyard]}" "$BARNYARD_TEMP/runs/$module"
     fi
 
     o_barnyard[module]="$module"
@@ -246,7 +248,7 @@ run() {
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         log module="$module" "marking module %s as applied" "${module}"
-        git -C "${o_barnyard[barnyard]}" log -n 1 --format='%H %at %GF' "${o_registers[checkout]}" > "/var/lib/barnyard/applied/${module}"
+        git -C "${o_registers[barnyard]}" log -n 1 --format='%H %at %GF' "${o_registers[checkout]}" > "/var/lib/barnyard/applied/${module}"
     fi
 }
 
@@ -307,17 +309,19 @@ main() {
         o_registers[git]="sudo -u $SUDO_USER git -C $(printf %q ${o_barnyard[barnyard]})"
         IFS=' ' read -A modules <<< "${o_registers[modules]}"
         o_barnyard[stage]=development
+        o_registers[barnyard]="${o_barnyard[barnyard]}"
         loop_modules "${modules[@]}"
     else
+        o_registers[barnyard]="${o_barnyard[barnyard]}"
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes'
-        o_registers[git]="git -C $(printf %q ${o_barnyard[barnyard]})"
-        git -C "${o_barnyard[barnyard]}" checkout -q "${o_barnyard[branch]}"
-        git -C "${o_barnyard[barnyard]}" pull -q origin "$branch"
+        o_registers[git]="git -C $(printf %q ${o_registers[barnyard]})"
+        git -C "${o_registers[barnyard]}" checkout -q "${o_barnyard[branch]}"
+        git -C "${o_registers[barnyard]}" pull -q origin "$branch"
         declare -a current
         local sha1
         if [[ -e "/var/lib/barnyard/sha1/${o_barnyard[hostname]}" ]]; then
             sha1=$(<"/var/lib/barnyard/sha1/${o_barnyard[hostname]}")
-            IFS=' ' read -A current <<< "$(git -C ${o_barnyard[barnyard]} log -n 1 --format='%H %at %GF' "$sha1")"
+            IFS=' ' read -A current <<< "$(git -C ${o_registers[barnyard]} log -n 1 --format='%H %at %GF' "$sha1")"
         fi
 
         if [[ "${#current[@]}" -eq 0 ]]; then
@@ -327,7 +331,7 @@ main() {
                     checkout=("${fields[@]}")
                     break
                 fi
-            done < <(git -C "${o_barnyard[barnyard]}" log --format='%H %at %GF')
+            done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %GF')
         else
             while read -r line; do
                 IFS=' ' read -A fields <<< "$line"
@@ -338,15 +342,16 @@ main() {
                 if [[ "${fields[1]}" == "${current[1]}" ]]; then
                     break
                 fi
-            done < <(git -C "${o_barnyard[barnyard]}" log --format='%H %at %GF')
+            done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %GF')
         fi
 
         # https://stackoverflow.com/a/21941473
         if [[ "${#checkout[@]}" -ne 0 ]]; then
             o_registers[checkout]="${checkout[1]}"
+            echo "will checkout ${o_registers[checkout]}"
             o_barnyard[stage]=production
 
-            local list="$(ls "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}")"
+            local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
             declare -a modules=("${(@f)list}")
 
             loop_modules "${modules[@]}"
