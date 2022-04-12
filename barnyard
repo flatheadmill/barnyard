@@ -233,7 +233,6 @@ run() {
     if [[ "${o_barnyard[stage]}" == production ]]; then
         git -C "${o_registers[barnyard]}" archive "${o_registers[checkout]}" | tar -C "$BARNYARD_TEMP/runs/$module" -x
         o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$module"
-        find "$BARNYARD_TEMP/runs/$module/resources/${o_barnyard[hostname]}"
     else
         cp -R "${o_registers[barnyard]}" "$BARNYARD_TEMP/runs/$module"
     fi
@@ -348,7 +347,6 @@ main() {
         # https://stackoverflow.com/a/21941473
         if [[ "${#checkout[@]}" -ne 0 ]]; then
             o_registers[checkout]="${checkout[1]}"
-            echo "will checkout ${o_registers[checkout]}"
             o_barnyard[stage]=production
 
             local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
