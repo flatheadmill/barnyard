@@ -155,8 +155,8 @@ barnyard_quotedoc() {
     while read -r line; do
         lines+=("$line")
         if [[ "$line" =~ $leading ]]; then
-            if [[ "${#BASH_REMATCH[1]}" -lt "$spaces" ]]; then
-                spaces="${#BASH_REMATCH[1]}"
+            if [[ "${#match[1]}" -lt "$spaces" ]]; then
+                spaces="${#match[1]}"
             fi
         else
             echo miss
