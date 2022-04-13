@@ -158,15 +158,13 @@ barnyard_quotedoc() {
             if [[ "${#match[1]}" -lt "$spaces" ]]; then
                 spaces="${#match[1]}"
             fi
-        else
-            echo miss
         fi
     done < /dev/stdin
     read -r -d '' dedented < <(printf "%s\n" "${lines[@]}" | sed -E 's/^ {'$spaces'}//')
     eval "$({
-        echo "cat <<EOF"
-        echo -n "$dedented"
-        echo "EOF"
+        print -R "cat <<EOF"
+        print -R -n "$dedented"
+        print -R "EOF"
     })"
 }
 
