@@ -171,28 +171,28 @@ barnyard_quotedoc() {
 ___
 
 run() {
-    local module="$1"
+    o_barnyard[module]="$1"
     shift
 
-    local configuration="${o_registers[barnyard]}/machines/${o_barnyard[hostname]}/${module}"
-    [[ -e "$configuration" ]] || abend no_configuration_for_module "$module"
+    local configuration="machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
+    [[ -e "${o_registers[barnyard]}/$configuration" ]] || abend no_configuration_for_module "${o_barnyard[module]}"
     declare -A o_module
-    barnyard_read_config o_module "$configuration" _apply once
+    barnyard_read_config o_module "${o_registers[barnyard]}/$configuration" _apply once
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         if [[ -n "${o_module[_dependencies]}" ]]; then
             declare -a dependencies
             read -r -A dependencies <<< "${o_module[_dependencies]}"
             for dependency in "${dependencies[@]}"; do
-                if [[ -z "${seen[$module]}" ]]; then
-                    log info module="$module" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${module}"
+                if [[ -z "${seen[$o_barnyard[module]]}" ]]; then
+                    log info module="$o_barnyard[module]" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${o_barnyard[module]}"
                     run "$dependency"
                 fi
             done
         fi
     fi
 
-    [[ -n "${seen[$module]}" ]] && return || seen[$module]=0
+    [[ -n "${seen[$o_barnyard[module]]}" ]] && return || seen[$o_barnyard[module]]=0
 
     mkdir -p /var/lib/barnyard/applied
 
@@ -200,7 +200,7 @@ run() {
         case "${o_module[_apply]}" in
             once )
                 if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
-                    log module="$module" "already applied module %s" "${module}"
+                    log module="${o_barnyard[module]}" "already applied module %s" "${o_barnyard[module]}"
                     return 0
                 fi
                 ;;
@@ -209,35 +209,34 @@ run() {
                     declare application
                     read -r -A application < "/var/lib/barnyard/applied/${module}"
                     if git -C "${o_registers[barnyard]}" diff --quiet "${application[1]}"; then
-                        log module="$module" "already applied module %s" "${module}"
+                        log module="${o_barnyard[module]}" "already applied module %s" "${o_barnyard[module]}"
                         return 0
                     fi
-                    log module="$module" "module %s has changed, re-applying" "${module}"
+                    log module="${o_barnyard[module]}" "module %s has changed, re-applying" "${o_barnyard[module]}"
                 fi
                 ;;
             never )
-                log module="$module" "module % run set to never, skipping" "${module}"
+                log module="${o_barnyard[module]}" "module % run set to never, skipping" "${o_barnyard[module]}"
                 return 0
                 ;;
         esac
     fi
 
-    mkdir -p "$BARNYARD_TEMP/runs/$module"
+    mkdir -p "$BARNYARD_TEMP/runs/${o_barnyard[module]}"
 
     rm -rf "$BARNYARD_TEMP/tmp"
     mkdir -p "$BARNYARD_TEMP/tmp"
     o_barnyard[tmp]="$BARNYARD_TEMP/tmp"
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
-        git -C "${o_registers[barnyard]}" archive "${o_registers[checkout]}" | tar -C "$BARNYARD_TEMP/runs/$module" -x
+        git -C "${o_registers[barnyard]}" archive "${o_registers[checkout]}" | tar -C "$BARNYARD_TEMP/runs/${o_barnyard[module]}" -x
     else
-        cp -R "${o_registers[barnyard]}"/* "$BARNYARD_TEMP/runs/$module"
+        cp -R "${o_registers[barnyard]}"/* "$BARNYARD_TEMP/runs/${o_barnyard[module]}"
     fi
 
-    o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$module"
+    o_barnyard[barnyard]="$BARNYARD_TEMP/runs/${o_barnyard[module]}"
+    o_barnyard[configuration]="${o_barnyard[barnyard]}/$configuration"
 
-    o_barnyard[module]="$module"
-    local foo=o_barnyard
     barnyard_write_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
     zsh "$BARNYARD_TEMP/barnyard/run" "$SCRIPT_DIR/barnyard"
     local code=$?
@@ -370,7 +369,9 @@ main() {
     barnyard_read_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
     barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
     o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
-    . "$BARNYARD_TEMP/runs/${o_barnyard[module]}/modules/${o_barnyard[module]}/apply.zsh"
+    local module
+    [[ -z "${o_module[_module]}" ]] && module="${o_barnyard[module]}" || module="${o_module[_module]}"
+    . "$BARNYARD_TEMP/runs/${o_barnyard[module]}/modules/${module}/apply.zsh"
 }
 
 main "$@"
