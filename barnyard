@@ -232,10 +232,11 @@ run() {
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
         git -C "${o_registers[barnyard]}" archive "${o_registers[checkout]}" | tar -C "$BARNYARD_TEMP/runs/$module" -x
-        o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$module"
     else
-        cp -R "${o_registers[barnyard]}" "$BARNYARD_TEMP/runs/$module"
+        cp -R "${o_registers[barnyard]}"/* "$BARNYARD_TEMP/runs/$module"
     fi
+
+    o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$module"
 
     o_barnyard[module]="$module"
     local foo=o_barnyard
