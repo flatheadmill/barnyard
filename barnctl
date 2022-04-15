@@ -201,9 +201,12 @@ barnctl_next_command() {
     for func in "${BARNCTL_COMMANDS[@]}"; do
         if [[ "$func" == "$prefix$command" ]]; then
             "barnctl_command_$func" "$@"
-            break
+            return
         fi
     done
+    abend <<'    EOF'
+        error: no such command \`barnctl ${prefix:gs/_/ }$command\`
+    EOF
 }
 
 ___ barnctl_common ___
