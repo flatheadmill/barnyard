@@ -182,7 +182,7 @@ run() {
     barnyard_read_config o_module "${o_registers[barnyard]}/$configuration" _apply once
 
     if [[ "${o_barnyard[stage]}" == production ]]; then
-        if [[ $o_barnyard[cron] -eq 0 && $o_module[_apply] != cron ]]; then
+        if [[ $o_registers[cron] -eq 0 && $o_module[_apply] != cron ]]; then
             log module="${module}" "not applying module %s during cron" "${module}"
             return
         fi
@@ -300,7 +300,7 @@ main() {
         o_barnyard[barnyard]=/var/lib/barnyard/repository
     fi
 
-    barnyard_parse_arguments o_registers "$@" cron 1
+    barnyard_parse_arguments o_registers 'cron=1' "$@"
 
     if [[ -n "$o_registers[develop]" || -n "$o_registers[modules]" ]]; then
         [[ -n "$SUDO_USER" ]] || abend must_run_develop_through_sudo
