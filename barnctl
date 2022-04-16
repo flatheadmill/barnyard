@@ -232,17 +232,15 @@ barnctl_read_config() {
     : ${(PA)${1:-reply}::=${(@kv)barnctl_read_config}}
 }
 
+# TODO Going to try to star the spaces in my dotfiles, if that works come back
+# here and fix it.
 barnctl_quotedoc() {
-    local heredoc spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
+    local spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
     declare -a lines
     while read -r line; do
         lines+=("$line")
-        if [[ "$line" =~ $leading ]]; then
-            if [[ "${#match[1]}" -lt "$spaces" ]]; then
-                spaces="${#match[1]}"
-            fi
-        else
-            echo miss
+        if [[ "$line" =~ $leading && "${#match[1]}" -lt "$spaces" ]]; then
+            spaces="${#match[1]}"
         fi
     done < /dev/stdin
     read -r -d '' dedented < <(printf "%s\n" "${lines[@]}" | sed -E 's/^ {'$spaces'}//')
@@ -524,7 +522,6 @@ main() {
     o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
     barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    echo barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
     source "${o_barnyard[barnyard]}/modules/${o_barnyard[module]}/configure.zsh"
 }
 
