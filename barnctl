@@ -232,10 +232,8 @@ barnctl_read_config() {
     : ${(PA)${1:-reply}::=${(@kv)barnctl_read_config}}
 }
 
-# TODO Going to try to star the spaces in my dotfiles, if that works come back
-# here and fix it.
 barnctl_quotedoc() {
-    local spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
+    local spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
     declare -a lines
     while read -r line; do
         lines+=("$line")
@@ -367,6 +365,25 @@ acrectl_string_resource() {
 
 barnctl_command_arguments() {
     barnctl_parse_arguments arguments ",long:" "s,:" "a,array@" "v,value:" "f,flag" -- "$@"
+}
+
+barnctl_command_quotedoc() {
+    local greeting=hello
+    barnctl_quotedoc <<'    EOF'
+        hello
+
+        $greeting
+
+        hello
+    EOF
+local greeting=hello
+barnctl_quotedoc <<EOF
+hello
+
+$greeting
+
+hello
+EOF
 }
 
 main() {
