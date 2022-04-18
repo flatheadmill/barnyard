@@ -182,7 +182,7 @@ zsh_parse_arguments() {
 }
 
 acrectl_parse_arguments_error() {
-    print -R -u 2 "@"
+    print -R -u 2 "$@"
     exit 1
 }
 
