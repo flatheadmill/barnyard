@@ -433,7 +433,7 @@ force=$4
 
 if [[ ( -e /etc/barnyard || -e /var/lib/barnyard ) && "$force" != 0 ]]; then
     echo "error: Barnyard already installed, use \`--force\` to overwrite." 1>&2
-    exit 1
+    exit 2
 fi
 
 rm -f /usr/local/bin/barnyard
