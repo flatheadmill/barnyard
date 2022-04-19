@@ -1,5 +1,8 @@
 #!/usr/bin/env zsh
 
+# TODO barnyard_put_array o_modules packages "$@"
+# TODO barnyard_get_array o_modules packages a_packages
+
 VERSION=0.1.0
 
 ___() {
@@ -38,16 +41,30 @@ barnyard_write_config() {
 }
 
 barnyard_read_config_() {
-    local file=${2:-} regex='^([^=]+)=(.*)$' line
+    local file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
     shift 2
     while [[ $# -ne 0 ]]; do
         barnyard_read_config[$1]=${2:-}
         shift 2
     done
+    declare -a array
     while read -r line; do
         [[ "$line" =~ $regex ]] || abend bad_config "$config"
-        local key=$match[1] value=$match[2]
-        barnyard_read_config[$key]="$value"
+        local key=$match[1] element_type=$match[2] value=$match[3]
+        case "$element_type" in
+            += )
+                if (( ${+barnyard_read_config[$key]} )); then
+                    array=("${(@Q)${(@z)barnyard_read_config[$key]}}")
+                else
+                    array=()
+                fi
+                array+=("$value")
+                barnyard_read_config[$key]="${(@qq)${array[@]}}"
+                ;;
+            = )
+                barnyard_read_config[$key]="$value"
+                ;;
+        esac
     done < "$file"
 }
 
