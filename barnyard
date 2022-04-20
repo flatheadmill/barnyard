@@ -167,7 +167,7 @@ barnyard_divider() {
 }
 
 barnyard_quotedoc() {
-    local heredoc spaces=65536 leading='^( +)([^[:space:]])' IFS='' dedented
+    local heredoc spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
     declare -a lines
     while read -r line; do
         lines+=("$line")
