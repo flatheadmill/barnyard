@@ -284,7 +284,26 @@ loop_modules() {
     barnyard_bash_resource barnyard_run > "$BARNYARD_TEMP/barnyard/run"
     barnyard_write_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
 
-    declare -A seen
+    declare -A seen ordered o_module
+    declare -a unordered
+    local configuration
+    for module in "$@"; do
+        configuration="machines/${o_barnyard[hostname]}/${module}"
+        [[ -e "${o_registers[barnyard]}/$configuration" ]] || abend no_configuration_for_module "${module}"
+        declare -A o_module
+        barnyard_read_config o_module "${o_registers[barnyard]}/$configuration" _apply once
+        if [[ "${o_module[_order]}" ]]; then
+            ordered[$module]="${o_module[_order]}"
+        else
+            unordered+=("$module")
+        fi
+    done
+
+    declare -a in_order
+    in_order=(${(f)"$(sort -k1,2 <(for module order in "${(@kv)ordered}"; do echo "$order $module"; done) | cut -d' ' -f2)"})
+    in_order+=("${unordered[@]}")
+
+    echo "${in_order]@]}"
 
     for module in "$@"; do run "$module"; done
 }
