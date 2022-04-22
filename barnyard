@@ -303,9 +303,13 @@ loop_modules() {
     in_order=(${(f)"$(sort -k1,2 <(for module order in "${(@kv)ordered}"; do echo "$order $module"; done) | cut -d' ' -f2)"})
     in_order+=("${unordered[@]}")
 
-    echo "${in_order]@]}"
+    echo here
 
-    for module in "$@"; do run "$module"; done
+    print -R "${in_order[@]}"
+
+    echo there
+
+    for module in "${in_order[@]}"; do run "$module"; done
 }
 
 main() {
