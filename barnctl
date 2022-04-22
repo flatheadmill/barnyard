@@ -304,6 +304,82 @@ barnctl_command_bootstrap() {
     _compile_script | ssh "$server" bash -s "$(printf " %q" "$o_repository" "$o_branch" "$o_fingerprint" "$o_force")"
 }
 
+assert_barnyard_directory() {
+    [[ -d age && -d users && -d machines && -d modules && -d resources ]] || abend<<'    EOF'
+        error: barnyard utilties must be run in the barnyard directory
+    EOF
+}
+
+barnctl_command_generate() {
+    eval "$(barnctl_parse_arguments generate "h,help" -- "$@")"
+
+    assert_barnyard_directory
+
+    local now=$(date +%s)
+
+    declare -a file option
+    declare -a tokens
+
+    local line
+    declare -a machine fields
+    for configuration in "$@"; do
+        tokens=(${(@Q)${(@z)"$(yq -o=json '.' < $configuration | jq  -r '
+            [
+                .machines | to_entries[] | .key as $machine | .value | to_entries as $a | $a | keys[] |
+                    $machine, ., $a[.].key,
+                        ($a[.].value | to_entries as $b | ($b | length), ($b[] | .key, .value))
+            ] | @sh
+        ')"}})
+        let i=1
+        while [[ $i -le ${#tokens[@]} ]]; do
+            machine=${tokens[$i]}
+            order=${tokens[(( i + 1 ))]}
+            file=${tokens[(( i + 2 ))]}
+            count=${tokens[(( i + 3 ))]}
+            if [[ $order -eq 0 ]]; then
+                rm -rf machines/$machine
+                mkdir -p machines/$machine
+                touch machines/$machine/.generated
+            fi
+            let i+=4
+            print -R "_order=$order" > "machines/$machine/$file"
+            while [[ $count -ne 0 ]]; do
+                print -R "$tokens[i]=$tokens[(( i + 1 ))]" >> "machines/$machine/$file"
+                let count=count-1
+                let i+=2
+            done
+        done
+    done
+
+    while read user; do
+        rm -f "users/$user"
+        touch "users/$user"
+        while read line; do
+            read -r -A option <<< "$line"
+            local decoded=$(echo "${option[2]}" | base64 --decode)
+            if [[ "$decoded" == *$'\n'* ]]; then
+                echo "${option[1]}=${option[2]}" >> "users/$user"
+            else
+                echo "${option[1]}=${decoded}" >> "users/$user"
+            fi
+        done < <(gojq -r --yaml-input --arg user "${user}" '
+            .users[$user] | to_entries[] | [ .key, (.value | tostring | @base64) ] | join(" ")
+        ' < users.yaml)
+    done < <(gojq -r --yaml-input '.users | to_entries[] | .key' < users.yaml)
+
+    exit
+
+    stat_format=(-c '%Y')
+    [[ "$os" = osx ]] && stat_format=(-f '%Dm')
+    for machine in $(find . -name '.generated'); do
+        if [[ $(stat "${stat_format[@]}" "$machine") -lt $now ]]; then
+            rm -rf "$(dirname $machine)"
+            rm -rf "resources/$(basename $(dirname $machine))"
+            rm -f "age/$(basename $(dirname $machine))"
+        fi
+    done
+}
+
 barnctl_command_commit() {
     eval "$(barnctl_parse_arguments commit "h,help" "u,user:" -- "$@")"
     echo 'cd /var/lib/barnyard/commit && tar -czf - * | base64' | ssh "$(_barnctl_get_server "$@" "${o_user[1]}")" zsh
