@@ -367,10 +367,8 @@ barnctl_command_generate() {
         ' < users.yaml)
     done < <(gojq -r --yaml-input '.users | to_entries[] | .key' < users.yaml)
 
-    exit
-
     stat_format=(-c '%Y')
-    [[ "$os" = osx ]] && stat_format=(-f '%Dm')
+    [[ "$OSTYPE" = darwin* ]] && stat_format=(-f '%Dm')
     for machine in $(find . -name '.generated'); do
         if [[ $(stat "${stat_format[@]}" "$machine") -lt $now ]]; then
             rm -rf "$(dirname $machine)"
