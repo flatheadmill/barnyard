@@ -320,15 +320,17 @@ barnctl_command_generate() {
     declare -a file option
     declare -a tokens
 
-    local line
+    local line i j
     declare -a machine fields
     for configuration in "$@"; do
         tokens=(${(@Q)${(@z)"$(yq -o=json '.' < $configuration | jq  -r '
-            [
-                .machines | to_entries[] | .key as $machine | .value | to_entries as $a | $a | keys[] |
-                    $machine, ., $a[.].key,
-                        ($a[.].value | to_entries as $b | ($b | length), ($b[] | .key, .value))
-            ] | @sh
+          [
+              .machines | to_entries[] | .key as $machine | .value | to_entries as $a | $a | keys[] |
+                  $machine, ., $a[.].key,
+                      ($a[.].value | to_entries as $b | ($b | length), ($b[] | .key, (
+                        .value as $v | ($v | if type == "array" then ($v | length), $v else (0, $v) end)
+                        )))
+          ] | flatten | @sh
         ')"}})
         let i=1
         while [[ $i -le ${#tokens[@]} ]]; do
@@ -344,9 +346,18 @@ barnctl_command_generate() {
             let i+=4
             print -R "_order=$order" > "machines/$machine/$file"
             while [[ $count -ne 0 ]]; do
-                print -R "$tokens[i]=$tokens[(( i + 1 ))]" >> "machines/$machine/$file"
+                if (( $tokens[(( i + 1 ))] == 0 )); then
+                    print -R "$tokens[i]=$tokens[(( i + 2 ))]" >> "machines/$machine/$file"
+                    let i+=3
+                else
+                    j=0
+                    while (( j != $tokens[(( i + 1 ))] )); do
+                        print -R "$tokens[i]+=$tokens[(( i + j + 2 ))]" >> "machines/$machine/$file"
+                        let j++
+                    done
+                    let i=i+2+j
+                fi
                 let count=count-1
-                let i+=2
             done
         done
     done
