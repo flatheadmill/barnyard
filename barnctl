@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.1.0
+BARNCTL_VERSION=0.1.0
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -442,6 +442,11 @@ barnctl_command_configure() {
             zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module $o_force
         fi
     done
+}
+
+barnctl_command_version() {
+    eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
+    print -R $BARNCTL_VERSION
 }
 
 barnctl_command_apply() {

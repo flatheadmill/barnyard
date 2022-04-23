@@ -1,0 +1,17 @@
+machines:
+  juliett.postgresql.gcp.acreops.one:
+    datadog: {}
+    destroy_google_sudoers: {}
+    zsh: {}
+    users:
+      _dependencies: destroy_google_sudoers zsh
+      _apply: diff
+      users: cory alan
+    sudoers:
+      _dependencies: users
+      sudoers: cory alan
+    apt:
+      keys:
+      - foo
+      - bar
+    sshpop: {}
