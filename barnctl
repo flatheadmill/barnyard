@@ -323,6 +323,7 @@ barnctl_command_generate() {
     local line i j
     declare -a machine fields
     for configuration in "$@"; do
+        [[ ${configuration#*.} != yaml ]] && continue
         tokens=(${(@Q)${(@z)"$(yq -o=json '.' < $configuration | jq  -r '
           [
               .machines | to_entries[] | .key as $machine | .value | to_entries as $a | $a | keys[] |
@@ -360,6 +361,19 @@ barnctl_command_generate() {
                 let count=count-1
             done
         done
+    done
+
+    local generate
+
+    generate="$({
+        barnctl_shell_resource barnctl_common
+        print ''
+        barnctl_shell_resource barnctl_generate
+    })"
+
+    for configuration in "$@"; do
+        [[ ${configuration#*.} != zsh ]] && continue
+        zsh -c "$generate" -- "$configuration"
     done
 
     while read user; do
@@ -637,6 +651,60 @@ main() {
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
     barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
     source "${o_barnyard[barnyard]}/modules/${o_barnyard[module]}/configure.zsh"
+}
+
+main "$@"
+___ barnctl_generate ___
+machine() {
+    local hostname=${1:-}
+    shift
+    __o_registers[hostname]="$hostname"
+    __o_registers[order]=0
+    rm -rf "machines/${hostname}"
+    mkdir -p "machines/${hostname}"
+    touch "machines/${hostname}/.generated"
+}
+
+@() {
+    local module=${1:-}
+    shift
+    [[ -z "$module" ]] && abend<<'    EOF'
+        error: module name is required
+    EOF
+    local regex='[a-z0-9_@]+'
+    [[ "${module:1}" =~ $regex ]] || abend<<'    EOF'
+        error: invalid module name $module
+    EOF
+    local filename key value
+    filename="machines/${__o_registers[hostname]}/$module"
+    echo "_order=$__o_registers[order]" > "$filename"
+    while (( $# != 0 )); do
+        case "$1" in
+            once | diff | cron | never )
+                print -R "_apply=$1" >> "$filename"
+                ;;
+            *+=* | *=* )
+                print -R "$1" >> "$filename"
+                ;;
+            - )
+                barnctl_heredoc >> "$filename"
+                ;;
+            * )
+                abend <<'                EOF'
+                    error: unknown module value $1"
+                EOF
+                ;;
+        esac
+        shift
+    done
+    __o_registers[order]=$(( __o_registers[order] + 1 ))
+}
+
+main() {
+    declare -A o_barnyard __o_registers
+    o_barnyard[conifguration]=${1:-}
+    shift
+    source "$o_barnyard[conifguration]"
 }
 
 main "$@"
