@@ -233,9 +233,13 @@ run() {
                 ;;
             diff | cron )
                 if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
-                    declare application
-                    read -r -A application < "/var/lib/barnyard/applied/${module}"
-                    if git -C "${o_registers[barnyard]}" diff --quiet "${application[1]}"; then
+                    declare -a applied diffs
+                    barnyard_get_array o_module _diff diffs
+                    diffs+=$(o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/$module)
+                    echo ">> work in progress paths >> ${paths[@]}"
+                    echo git -C "${o_registers[barnyard]}" diff --quiet "${applied[1]}" -- "${diffs[@]}"
+                    read -r -A applied < "/var/lib/barnyard/applied/${module}"
+                    if git -C "${o_registers[barnyard]}" diff --quiet "${applied[1]}"; then
                         log module="${module}" "already applied module %s" "${module}"
                         return 0
                     fi
