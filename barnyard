@@ -1,5 +1,11 @@
 #!/usr/bin/env zsh
 
+# Now I want the ability to export the barnyard functions.
+#
+# This means `barnyard apply`, `barnyard funcs`, `barnyard whever`.
+#
+# But we don't want to get into serious argument parsing, do we?
+
 # TODO barnyard_put_array o_modules packages "$@"
 # TODO barnyard_get_array o_modules packages a_packages
 
