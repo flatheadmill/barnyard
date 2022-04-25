@@ -109,61 +109,58 @@ abend() {
 log() {
     SALT=a5bbeb04f50fcdee70b0b5976438a8d8
 
-    _log() {
-        local priority
-        if [[ -z "${PRIORITY[$1]}" ]]; then
-            priority=info
-        else
-            priority="$1"
-            shift
-        fi
-
-        declare -a journald syslog
-        local name value regex='^([^=]+)=(.*)$'
-        while true; do
-            if [[ "$1" =~ $regex ]]; then
-                name="${match[1]}" value="${match[2]}"
-                journald+=("${name:u}=${value}")
-                syslog+=("${name}=${value}")
-                if [[ "$name" == priority ]]; then
-                    priority=$value
-                fi
-                shift
-            else
-                break
-            fi
-        done
-
-        priority=$PRIORITY[$priority]
-
-        if [[ "$priority" -gt "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]]; then
-            return
-        fi
-
-        local format="$1" message
-        shift
-        message=$(printf "$format\n" "$@")
-
-        local context=''
-        if [[ ${#syslog[@]} -ne 0 ]]; then
-            context="; ${(j:, :)syslog}"
-        fi
-
-        echo "$(date --rfc-3339=s | sed 's/+.*//') barnyard[info]: $message$context"
-
-        local id
-        id=$(echo "$SALT" "$format" | md5sum | cut -d' ' -f1)
-
-        journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=$priority SYSLOG_FACILITY=1)
-        print "${(j:\n:)journald}" | logger --journald
-    }
-
-    local module
-    if [[ -n "${o_barnyard[module]}" ]]; then
-        _log module="${o_barnyard[module]}" "$@"
+    local priority level
+    if [[ -z "${PRIORITY[$1]}" ]]; then
+        priority=info
     else
-        _log "$@"
+        priority="$1"
+        shift
     fi
+
+
+    declare -a journald syslog
+    local name value regex='^([^=]+)=(.*)$'
+    while true; do
+        if [[ "$1" =~ $regex ]]; then
+            name="${match[1]}" value="${match[2]}"
+            journald+=("${name:u}=${value}")
+            syslog+=("${name}=${value}")
+            if [[ "$name" == priority ]]; then
+                priority=$value
+            fi
+            shift
+        else
+            break
+        fi
+    done
+
+    if [[ -n "${o_barnyard[module]}" ]]; then
+        journald+=("MODULE=${o_barnyard[module]}")
+        syslog+=("module=${o_barnyard[module]}")
+    fi
+
+    level=$PRIORITY[$priority]
+
+    if [[ "$priority" -gt "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]]; then
+        return
+    fi
+
+    local format="$1" message
+    shift
+    message=$(printf "$format\n" "$@")
+
+    local context=''
+    if [[ ${#syslog[@]} -ne 0 ]]; then
+        context="; ${(j:, :)syslog}"
+    fi
+
+    echo "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
+
+    local id
+    id=$(echo "$SALT" "$format" | md5sum | cut -d' ' -f1)
+
+    journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=$level SYSLOG_FACILITY=1)
+    print "${(j:\n:)journald}" | logger --journald
 }
 
 barnyard_divider() {
