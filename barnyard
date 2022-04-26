@@ -201,7 +201,7 @@ run() {
     shift
 
     local configuration="machines/${o_barnyard[hostname]}/${module}"
-    [[ -e "${o_registers[barnyard]}/$configuration" ]] || abend no_configuration_for_module "${module}"
+    [[ -e "${o_registers[barnyard]}/$configuration" ]] || abend 'no configuration for module %s' "${module}"
     declare -A o_module
     barnyard_read_config o_module "${o_registers[barnyard]}/$configuration" _apply once
 
