@@ -680,7 +680,6 @@ machine() {
     echo "_order=$__o_registers[order]" > "$filename"
     while (( $# != 0 )); do
         key="${1/#*=/=}"
-        echo ">> ${1:q} | ${key:q} | ${1/%=*/=}"
         case "${1/%=*/=}" in
             once | diff | cron | never )
                 print -R "_apply=$1" >> "$filename"
@@ -702,7 +701,7 @@ machine() {
                 done
                 ;;
             - )
-                barnctl_heredoc >> "$filename"
+                barnctl_quotedoc >> "$filename"
                 ;;
             * )
                 abend <<'                EOF'
