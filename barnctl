@@ -655,6 +655,66 @@ main() {
 
 main "$@"
 ___ barnctl_generate ___
+@_args() {
+    local key value
+    typeset -A arguments arrays associative_arrays scalars seen
+    typeset -a array remainder
+    while (( $# != 0 )); do
+        key="${1/%=*/=}"
+        case "$1" in
+            %* )
+                key=${1#%}
+                associative_arrays[$key]=0
+                if (( ${+arguments[$key]} )); then
+                    array=("${(@Q)${(@z)arguments[$key]}}")
+                else
+                    array=()
+                fi
+                array+=("${(@kv)${(P)key}}")
+                arguments[$key]="${(@qq)${array[@]}}"
+                ;;
+            * )
+                key="${1/%=*/=}"
+                case "$key" in
+                    *+= )
+                        key="${key%+=}"
+                        value="${1#*=}"
+                        arrays[$key]=0
+                        if (( ${+arguments[$key]} )); then
+                            array=("${(@Q)${(@z)arguments[$key]}}")
+                        else
+                            array=()
+                        fi
+                        array+=("$value")
+                        arguments[$key]="${(@qq)${array[@]}}"
+                        ;;
+                    *= )
+                        key="${key%=}"
+                        value="${1#*=}"
+                        scalars[$key]=0
+                        arguments[$key]=${value:q}
+                        ;;
+                    * )
+                        remainder+=("$1")
+                        ;;
+                esac
+                ;;
+        esac
+        shift
+    done
+    local variable
+    for variable in "${(@k)associative_arrays}"; do
+        print -R "typeset -A $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)arrays}"; do
+        print -R "typeset -a $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)scalars}"; do
+        print -R "typeset $variable=$arguments[$variable]"
+    done
+    [[ 0 -eq ${#remainder[@]} ]] && print -R "set --" || print -R "set -- ${(@qq)remainder[@]}"
+}
+
 machine() {
     local hostname=${1:-}
     shift
