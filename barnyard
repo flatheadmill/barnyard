@@ -154,10 +154,10 @@ log() {
         context="; ${(j:, :)syslog}"
     fi
 
-    echo "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
+    print -R "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
 
     local id
-    id=$(echo "$SALT" "$format" | md5sum | cut -d' ' -f1)
+    id=$(print -R "$SALT" "$format" | md5sum | cut -d' ' -f1)
 
     journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=$level SYSLOG_FACILITY=1)
     print "${(j:\n:)journald}" | logger --journald
