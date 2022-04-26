@@ -677,8 +677,13 @@ machine() {
     EOF
     local filename key value
     filename="machines/${__o_registers[hostname]}/$module"
-    echo "_order=$__o_registers[order]" > "$filename"
+    print -R "_order=$__o_registers[order]" > "$filename"
     while (( $# != 0 )); do
+        if [[ -d "$1" ]]; then
+            print -R "_module=${1#modules/}" >> "$filename"
+            shift
+            continue
+        fi
         key="${1/#*=/=}"
         case "${1/%=*/=}" in
             once | diff | cron | never )

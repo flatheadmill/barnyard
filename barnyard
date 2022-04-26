@@ -6,9 +6,6 @@
 #
 # But we don't want to get into serious argument parsing, do we?
 
-# TODO barnyard_put_array o_modules packages "$@"
-# TODO barnyard_get_array o_modules packages a_packages
-
 VERSION=0.1.0
 
 ___() {
@@ -32,6 +29,30 @@ barnyard_temporary_directory() {
 trap barnyard_cleanup EXIT
 
 ___ barnyard_common ___
+
+__barnyard_priorities() {
+    declare -A PRIORITY
+
+    PRIORITY[panic]=0
+    PRIORITY[alert]=1
+    PRIORITY[crit]=2
+    PRIORITY[err]=3
+    PRIORITY[warn]=4
+    PRIORITY[notice]=5
+    PRIORITY[info]=6
+    PRIORITY[debug]=7
+
+    if [[ -n "$BARNYARD_LOG_LEVEL" ]]; then
+        [[ -z "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]] && abend "invalid log level %s" "$BARNYARD_LOG_LEVEL"
+    else
+        BARNYARD_LOG_LEVEL=info
+    fi
+
+    # An environment variable so someone can set this in their shell.
+    export BARNYARD_LOG_LEVEL
+
+    main "$@"
+}
 
 barnyard_bash_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnyard"
@@ -75,7 +96,7 @@ barnyard_read_config_() {
 }
 
 barnyard_get_array() {
-    : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
+    [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
 }
 
 barnyard_read_config() {
@@ -195,92 +216,76 @@ barnyard_quotedoc() {
 ___
 
 run() {
-    # NB: Do use `o_barnyard[module]` as a variable because you call this
-    # function recursively.
-    local module="$1" _module
+    local module
+
+    module=${1:-}
+
     shift
 
-    local configuration="machines/${o_barnyard[hostname]}/${module}"
-    [[ -e "${o_registers[barnyard]}/$configuration" ]] || abend 'no configuration for module %s' "${module}"
-    declare -A o_module
-    barnyard_read_config o_module "${o_registers[barnyard]}/$configuration" _apply once
+    mkdir -p "$BARNYARD_TEMP/runs/$module"
 
-    if [[ "${o_barnyard[stage]}" == production ]]; then
-        if [[ $o_registers[cron] -eq 0 && $o_module[_apply] != cron ]]; then
-            log module="${module}" "not applying module %s during cron" "${module}"
-            return
-        fi
-        if [[ -n "${o_module[_dependencies]}" ]]; then
-            declare -a dependencies
-            read -r -A dependencies <<< "${o_module[_dependencies]}"
-            for dependency in "${dependencies[@]}"; do
-                if [[ -z "${seen[$module]}" ]]; then
-                    log module="${module}" depdendency="$dependency" "applying dependency %s for module %s" "${dependency}" "${module}"
-                    run "$dependency"
-                fi
-            done
-        fi
+    if [[ "$o_barnyard[stage]" == production ]]; then
+        git -C "$o_registers[barnyard]" archive "${o_registers[checkout]}" | tar -C "$BARNYARD_TEMP/runs/$module" -x
+    else
+        cp -R "$o_registers[barnyard]"/* "$BARNYARD_TEMP/runs/$module"
     fi
 
-    [[ -n "${seen[$module]}" ]] && return || seen[$module]=0
+    o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$module"
+    o_barnyard[configuration]="$o_barnyard[barnyard]/machines/$o_barnyard[hostname]/$module"
+    o_barnyard[resources]="$o_barnyard[barnyard]/resources/$o_barnyard[hostname]"
+    o_barnyard[age]="$(<"$o_barnyard[barnyard]/age/$o_barnyard[hostname]")" || \
+        abend module=$module hostname="$o_barnyard[hostname]" 'age key missing for $%s' "$o_barnyard[hostname]"
+
+    typeset -A o_module
+
+    [[ -e "$o_barnyard[configuration]" ]] || abend 'no configuration for module %s' "$module"
+    barnyard_read_config o_module "$o_barnyard[configuration]" _apply once _module "$module"
 
     mkdir -p /var/lib/barnyard/applied
 
-    if [[ "${o_barnyard[stage]}" == production ]]; then
-        case "${o_module[_apply]}" in
+    typeset -a applied diffs
+
+    if [[ "$o_barnyard[stage]" == production ]]; then
+        case "$o_module[_apply]" in
             once )
-                if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
-                    log module="${module}" "already applied module %s" "${module}"
+                if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
+                    log module="$module" "already applied module %s" "$module"
                     return 0
                 fi
                 ;;
             diff | cron )
-                if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
-                    declare -a applied diffs
-                    barnyard_get_array o_module _diff diffs
-                    diffs+=("${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/$module")
-                    echo ">> work in progress paths >> ${paths[@]}"
-                    echo git -C "${o_registers[barnyard]}" diff --quiet "${applied[1]}" -- "${diffs[@]}"
-                    read -r -A applied < "/var/lib/barnyard/applied/${module}"
-                    if git -C "${o_registers[barnyard]}" diff --quiet "${applied[1]}"; then
-                        log module="${module}" "already applied module %s" "${module}"
+                if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
+                    read -r -A applied < "/var/lib/barnyard/applied/$module"
+                    if [[ "$applied[1]" = "$o_registers[checkout]" ]]; then
+                        log module="$module" "already applied module %s" "$module"
                         return 0
                     fi
-                    log module="${module}" "module %s has changed, re-applying" "${module}"
+                    barnyard_get_array o_module _diff diffs
+                    diffs+=("machines/$o_barnyard[hostname]/$module")
+                    if git -C "$o_registers[barnyard]" diff --quiet "$applied[1]" "$o_registers[checkout]" -- "${diffs[@]}"; then
+                        log module="$module" "module %s has not changed, skipping" "$module"
+                        return 0
+                    fi
+                    log module="$module" "module %s has changed, re-applying" "$module"
                 fi
                 ;;
             never )
-                log module="${module}" "module % run set to never, skipping" "${module}"
+                log module="$module" "module % run set to never, skipping" "$module"
                 return 0
                 ;;
         esac
     fi
 
-    mkdir -p "$BARNYARD_TEMP/runs/${module}"
-
-    rm -rf "$BARNYARD_TEMP/tmp"
-    mkdir -p "$BARNYARD_TEMP/tmp"
-    o_barnyard[tmp]="$BARNYARD_TEMP/tmp"
-
-    if [[ "${o_barnyard[stage]}" == production ]]; then
-        git -C "${o_registers[barnyard]}" archive "${o_registers[checkout]}" | tar -C "$BARNYARD_TEMP/runs/${module}" -x
-    else
-        cp -R "${o_registers[barnyard]}"/* "$BARNYARD_TEMP/runs/${module}"
-    fi
-
-    o_barnyard[barnyard]="$BARNYARD_TEMP/runs/${module}"
-    o_barnyard[configuration]="${o_barnyard[barnyard]}/$configuration"
-
     o_barnyard[module]="$module"
-    barnyard_write_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
+    export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)o_barnyard}}"
+    export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
     zsh "$BARNYARD_TEMP/barnyard/run" "$SCRIPT_DIR/barnyard"
     local code=$?
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
-    o_barnyard[module]='' # reset for log, see above.
 
-    if [[ "${o_barnyard[stage]}" == production ]]; then
-        log module="$module" "marking module %s as applied" "${module}"
-        git -C "${o_registers[barnyard]}" log -n 1 --format='%H %at %GF' "${o_registers[checkout]}" > "/var/lib/barnyard/applied/${module}"
+    if [[ "$o_barnyard[stage]" == production ]]; then
+        log module="$module" "marking module %s as applied" "$module"
+        git -C "$o_registers[barnyard]" log -n 1 --format='%H %at %GF' "$o_registers[checkout]" > "/var/lib/barnyard/applied/$module"
     fi
 }
 
@@ -320,26 +325,6 @@ loop_modules() {
 }
 
 main() {
-    declare -A PRIORITY
-
-    PRIORITY[panic]=0
-    PRIORITY[alert]=1
-    PRIORITY[crit]=2
-    PRIORITY[err]=3
-    PRIORITY[warn]=4
-    PRIORITY[notice]=5
-    PRIORITY[info]=6
-    PRIORITY[debug]=7
-
-    if [[ -n "$BARNYARD_LOG_LEVEL" ]]; then
-        [[ -z "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]] && abend "invalid log level %s" "$BARNYARD_LOG_LEVEL"
-    else
-        BARNYARD_LOG_LEVEL=info
-    fi
-
-    # An environment variable so someone can set this in their shell.
-    export BARNYARD_LOG_LEVEL
-
     declare -A o_barnyard o_registers
     barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)"
 
@@ -402,6 +387,8 @@ main() {
             o_registers[checkout]="${checkout[1]}"
             o_barnyard[stage]=production
 
+            git -C "${o_registers[barnyard]}" checkout -q "$o_registers[checkout]"
+
             local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
             declare -a modules=("${(@f)list}")
 
@@ -412,22 +399,18 @@ main() {
     fi
 }
 
-main "$@"
+__barnyard_priorities "$@"
 
 exit
 
 ___ barnyard_run ___
+source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$1")
+
 main() {
-    source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$1")
-    declare -A PRIORITY o_barnyard o_module
-    barnyard_read_config PRIORITY "$BARNYARD_TEMP/barnyard/PRIORITY"
-    barnyard_read_config o_barnyard "$BARNYARD_TEMP/barnyard/o_barnyard"
-    barnyard_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
-    local module
-    [[ -z "${o_module[_module]}" ]] && module="${o_barnyard[module]}" || module="${o_module[_module]}"
-    . "$BARNYARD_TEMP/runs/${o_barnyard[module]}/modules/${module}/apply.zsh"
+    typeset -A o_barnyard=( ${(@Q)${(@z)__BARNYARD_O_BARNYARD__}} ) o_module=( ${(@Q)${(@z)__BARNYARD_O_MODULE__}} )
+    unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
+    . "$BARNYARD_TEMP/runs/$o_barnyard[module]/modules/$o_module[_module]/apply.zsh"
 }
 
-main "$@"
+__barnyard_priorities "$@"
 ___
