@@ -238,7 +238,7 @@ run() {
                 if [[ -e "/var/lib/barnyard/applied/${module}" ]]; then
                     declare -a applied diffs
                     barnyard_get_array o_module _diff diffs
-                    diffs+=$(o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/$module)
+                    diffs+=("${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/$module")
                     echo ">> work in progress paths >> ${paths[@]}"
                     echo git -C "${o_registers[barnyard]}" diff --quiet "${applied[1]}" -- "${diffs[@]}"
                     read -r -A applied < "/var/lib/barnyard/applied/${module}"
