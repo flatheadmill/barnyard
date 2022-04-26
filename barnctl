@@ -373,7 +373,7 @@ barnctl_command_generate() {
 
     for configuration in "$@"; do
         [[ ${configuration#*.} != zsh ]] && continue
-        zsh -c "$generate" -- "$configuration"
+        zsh -c "$generate" -- "$configuration" || exit 1
     done
 
     while read user; do
