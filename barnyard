@@ -304,12 +304,12 @@ loop_modules() {
     declare -a unordered
     local configuration
     for module in "$@"; do
-        configuration="machines/${o_barnyard[hostname]}/${module}"
-        [[ -e "${o_registers[barnyard]}/$configuration" ]] || abend no_configuration_for_module "${module}"
+        configuration="machines/$o_barnyard[hostname]/$module"
+        [[ -e "$o_registers[barnyard]/$configuration" ]] || abend 'no configuration for module %s' "$module"
         declare -A o_module
-        barnyard_read_config o_module "${o_registers[barnyard]}/$configuration" _apply once
-        if [[ "${o_module[_order]}" ]]; then
-            ordered[$module]="${o_module[_order]}"
+        barnyard_read_config o_module "$o_registers[barnyard]/$configuration" _apply once
+        if [[ "$o_module[_order]" ]]; then
+            ordered[$module]="$o_module[_order]"
         else
             unordered+=("$module")
         fi
