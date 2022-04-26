@@ -350,12 +350,13 @@ main() {
     barnyard_parse_arguments o_registers 'cron=1' "$@"
 
     if [[ -n "$o_registers[develop]" || -n "$o_registers[modules]" ]]; then
-        [[ -n "$SUDO_USER" ]] || abend must_run_develop_through_sudo
+        [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
         [[ -n "$o_registers[develop]" ]] && o_barnyard[barnyard]="$(readlink -f "${o_registers[develop]}")"
-        [[ -n "${o_registers[modules]}" ]] || o_register[modules]=''
-        [[ -e "${o_barnyard[barnyard]}" ]] || abend barnyard_does_not_exist "${o_barnyard[barnyard]}"
-        [[ $(stat -c '%U' "${o_barnyard[barnyard]}/.git/index") == $SUDO_USER ]] || \
-            abend sudo_user_does_not_own "$SUDO_USER" "${o_barnyard[barnyard]}"
+        [[ -n "$o_registers[modules]" ]] || o_register[modules]=''
+        [[ -e "$o_barnyard[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
+        typeset barnyard_user=$(stat -c '%U' "${o_barnyard[barnyard]}/.git/index")
+        [[ "$barnyard_user" == $SUDO_USER || "$barnyard_user" == root ]] || \
+            abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[barnyard]:q}"
         declare -a modules
         o_registers[git]="sudo -u $SUDO_USER git -C $(printf %q ${o_barnyard[barnyard]})"
         IFS=' ' read -A modules <<< "${o_registers[modules]}"
