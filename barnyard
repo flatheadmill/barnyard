@@ -131,7 +131,7 @@ log() {
     SALT=a5bbeb04f50fcdee70b0b5976438a8d8
 
     local priority level
-    if [[ -z "${PRIORITY[$1]}" ]]; then
+    if [[ -z "${PRIORITY[$1]-}" ]]; then
         priority=info
     else
         priority="$1"
@@ -162,7 +162,7 @@ log() {
 
     level=$PRIORITY[$priority]
 
-    if [[ "$priority" -gt "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]]; then
+    if (set +u; [[ "$priority" -gt "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]]); then
         return
     fi
 
