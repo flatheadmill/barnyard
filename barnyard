@@ -16,6 +16,208 @@ ___() {
 # something like `@/modules/postgresql/common`.
 SCRIPT_DIR=${${0:a}%/*}
 
+zsh_parse_arguments() {
+    local error=${${1:-}:q} context=${${2:-}:q}
+    shift 2
+
+    declare -A argument_properties
+
+    local regex short long kind variable default
+
+    while :
+    do
+        case "$1" in
+            --)
+                shift
+                break
+                ;;
+            *)
+                regex='^([a-zA-Z0-9]?),([^!@:#]*)([!@:#]?)(=.*)?$'
+                [[ "$1" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
+                short=${match[1]} long=${match[2]} kind=${match[3]} variable= default="${match[4]}"
+                [[ -z "$long" ]] && variable=o_$short || variable=o_$long
+                if [[ "$default" != '' ]]; then
+                    case x"$kind" in
+                        x )
+                            kind=flag
+                            [[ "${default:1}" =~ ^[0-1]$ ]] || { print -R "$error $context boolean ${1:q}" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x\! )
+                            kind=toggle
+                            [[ "${default:1}" =~ ^[0-1]$ ]] || { print -R "$error $context boolean ${1:q})" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x\# )
+                            kind=count
+                            [[ "${default:1}" =~ ^-?[0-9]+$ ]] || { print -R "$error $context integer ${1:q}" && return; }
+                            print -R "local $variable=${default:1}"
+                            ;;
+                        x: )
+                            kind=value
+                            print -R "declare -a $variable=( ${default:1:q} )"
+                            ;;
+                        x@ )
+                            { print -R "$error $context no_defaults ${1:q}" && return; }
+                            ;;
+                    esac
+                else
+                    case x"$kind" in
+                        x )
+                            kind=flag
+                            print -R "local $variable=1"
+                            ;;
+                        x\! )
+                            kind=toggle
+                            print -R "local $variable=0"
+                            ;;
+                        x\# )
+                            kind=count
+                            print -R "local $variable=0"
+                            ;;
+                        x: )
+                            kind=value
+                            print -R "declare -a $variable"
+                            ;;
+                        x@ )
+                            kind=array
+                            print -R "declare -a $variable"
+                            ;;
+                    esac
+                fi
+                if [[ -n "$long" ]]; then
+                    argument_properties[--${long}]="kind=$kind variable=$variable"
+                fi
+                if [[ -n "$short" ]]; then
+                    argument_properties[-${short}]="kind=$kind variable=$variable"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    declare -a args=( "$@" )
+    local i=1 arged flag
+    while [[ $i -le ${#args[@]} ]]
+    do
+        case "${args[$i]}" in
+            -- )
+                let i=i+1
+                break
+                ;;
+            --no-* )
+                regex='^--no-([a-zA-Z0-9]+)$'
+                if [[ "${args[$i]}" =~ $regex ]] && [[ -n "${argument_properties[--$match[1]]}" ]]; then
+                    eval "${argument_properties[--$match[1]]}"
+                    if [[ $kind == toggle ]]; then
+                        args[$i]="--${match[1]}"
+                        print -R "$variable=0"
+                    fi
+                fi
+                echo "${argument_properties[--$match[1]]}"
+                echo "${match[1]}"
+                ;&
+            --* )
+                arged=1
+                regex='^(--[a-zA-Z0-9]*)(=.*)?$'
+                [[ "${args[$i]}" =~ $regex ]] || { print -R "$error $context unknown ${1:q}"; return; }
+                long="${match[1]}"
+                if [[ "$match[2]" != '' ]]; then
+                    arged=0
+                    args[i]=${match[2]:1}
+                else
+                    let i=i+1
+                fi
+                flag=$long
+                [[ -z "${argument_properties[$long]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
+                eval "${argument_properties[$long]}"
+                ;;
+            -* )
+                short="${args[$i]}"
+                short="${short:0:2}"
+                flag=$short
+                [[ -z "${argument_properties[$short]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
+                eval "${argument_properties[$short]}"
+                case "$kind" in
+                    array | value )
+                        if [[ ${#short} -eq 2 ]]; then
+                            let i=i+1
+                        else
+                            args[i]=${short:2}
+                        fi
+                        ;;
+                    * )
+                        # TODO If you have args a b and c and you get -abd what
+                        # does getopt do? Seems to just append...
+                        if [[ ${#args[i]} -gt 2 ]]; then
+                            args[i]="-${short:2}"
+                        else
+                            let i=i+1
+                        fi
+                        ;;
+                esac
+                ;;
+            *)
+                break
+                ;;
+        esac
+        case "$kind" in
+            flag | count | toggle )
+                [[ $arged -eq 0 ]] && { print -R "$error $context no_args ${flag:q}"; return; }
+                ;;
+        esac
+        case "$kind" in
+            flag )
+                print -R "$variable=0"
+                ;;
+            count )
+                print -R "let $variable=$variable+1"
+                ;;
+            toggle )
+                print -R "[[ \$$variable -eq 0 ]] && $variable=1 || $variable=0"
+                ;;
+            value )
+                print -R "${variable}[1]=${args[$i]:q}"
+                let i=i+1
+                ;;
+            array )
+                print -R "${variable}+=(${args[$i]:q})"
+                let i=i+1
+                ;;
+        esac
+    done
+
+    [[ $i -eq $(( ${#args[@]} + 1 )) ]] && print -R "set --" || print -R "set -- ${(@)args[$i,-1]:q}"
+}
+
+barnyard_argument_error() {
+    print -R -u 2 "$@"
+    exit 1
+}
+
+barnyard_parse_arguments() {
+    zsh_parse_arguments barnyard_argument_error "$@"
+    echo "[[ \$o_help -eq 0 ]] && usage_$1"
+}
+
+IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
+    sed -n 's/^barnyard_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard" \
+)
+
+barnyard_next_command() {
+    local prefix=$1 command=$2
+    shift 2
+    for func in "${BARNCTL_COMMANDS[@]}"; do
+        if [[ "$func" == "$prefix$command" ]]; then
+            "barnyard_command_$func" "$@"
+            return
+        fi
+    done
+    abend <<'    EOF'
+        error: no such command \`barnyard ${prefix:gs/_/ }$command\`
+    EOF
+}
+
 barnyard_cleanup() {
     [[ -n "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
 }
@@ -31,6 +233,11 @@ trap barnyard_cleanup EXIT
 ___ barnyard_common ___
 
 __barnyard_priorities() {
+    local func=${1:-exit}
+
+    shift
+
+
     declare -A PRIORITY
 
     PRIORITY[panic]=0
@@ -51,7 +258,7 @@ __barnyard_priorities() {
     # An environment variable so someone can set this in their shell.
     export BARNYARD_LOG_LEVEL
 
-    main "$@"
+    "$func" "$@"
 }
 
 barnyard_bash_resource() {
@@ -116,7 +323,7 @@ barnyard_parse_arguments_() {
     done
 }
 
-barnyard_parse_arguments() {
+__barnyard_parse_arguments() {
     declare -a barnyard_parse_arguments
     barnyard_parse_arguments_ "$@"
     : ${(PA)${1:-reply}::=${(@kv)barnyard_parse_arguments}}
@@ -324,15 +531,31 @@ loop_modules() {
     for module in "${in_order[@]}"; do run "$module"; done
 }
 
-main() {
-    declare -A o_barnyard o_registers
+_barnyard_command_apply() {
+    eval "$(barnyard_parse_arguments apply "d,develop:" "h,help" -- "$@")"
+
+    typeset -A o_registers
+    [[ -n "$o_develop" ]] && o_registers[develop]="$o_develop"
+    (( $# )) && o_registers[modules]=${(j: :)@}
+
+    typeset -A o_barnyard
     barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)"
 
     if [[ -z "${o_barnyard[barnyard]}" ]]; then
         o_barnyard[barnyard]=/var/lib/barnyard/repository
     fi
 
-    barnyard_parse_arguments o_registers 'cron=1' "$@"
+    local regex='^([^=]+)=(.*)$'
+    typeset -a o_arguments
+    typeset -A o_registers
+    while [[ $# -ne 0 ]]; do
+        if [[ "$1" =~ $regex ]]; then
+            o_registers+=("$match[1]" "$match[2]")
+        else
+            o_arguments+=("$1")
+        fi
+        shift
+    done
 
     if [[ -n "$o_registers[develop]" || -n "$o_registers[modules]" ]]; then
         [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
@@ -399,7 +622,17 @@ main() {
     fi
 }
 
-__barnyard_priorities "$@"
+barnyard_command_apply() {
+    __barnyard_priorities _barnyard_command_apply "$@"
+}
+
+
+main() {
+    eval "$(barnyard_parse_arguments root "h,help" -- "$@")"
+    barnyard_next_command "" "$@"
+}
+
+main "$@"
 
 exit
 
@@ -412,5 +645,5 @@ main() {
     . "$BARNYARD_TEMP/runs/$o_barnyard[module]/modules/$o_module[_module]/apply.zsh"
 }
 
-__barnyard_priorities "$@"
+__barnyard_priorities main "$@"
 ___
