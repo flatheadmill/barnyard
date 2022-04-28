@@ -6,8 +6,6 @@
 #
 # But we don't want to get into serious argument parsing, do we?
 
-VERSION=0.1.0
-
 ___() {
 }
 
@@ -15,6 +13,8 @@ ___() {
 # like all I need are the directives and based64 encoding. Maybe include is
 # something like `@/modules/postgresql/common`.
 SCRIPT_DIR=${${0:a}%/*}
+
+VERSION=$(zsh $SCRIPT_DIR/barnctl version)
 
 zsh_parse_arguments() {
     local error=${${1:-}:q} context=${${2:-}:q}
@@ -647,6 +647,75 @@ barnyard_command_apply() {
     barnyard_configure _barnyard_command_apply "$@"
 }
 
+# Could argue that the repository should never change, but it comes from outside
+# and so yes, it could change. You might want to rename your repository, why
+# not? It's not immutable like the age or gpg key.
+
+barnyard_command_clone() {
+    eval "$(barnyard_parse_arguments clone "h,help" -- "$@")"
+
+    (( $# )) || abend 'a git repository url is required'
+    local repository=${1:-}
+
+    [[ -e /etc/barnyard/id_barnyard ]] || abend 'no barnyard ssh key'
+
+    rm -rf /var/lib/barnyard/repository
+
+    export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
+
+    git clone -q "${repository%#*}" /var/lib/barnyard/repository || abend 'unable to clone repository %s' "$repository"
+
+    local branch="${repository##*#}"
+    if [[ -z "$branch" ]]; then
+        branch=$(git rev-parse --abbrev-ref HEAD) || abend 'unable to determin branch for %s' "$repository"
+    else
+        git -C /var/lib/barnyard/repository checkout  "$branch" || abend 'unable to checkout branch %s' "$branch"
+    fi
+
+    print -R "branch=$branch" > /etc/barnyard/config
+}
+
+barnyard_command_commit() {
+    eval "$(barnyard_parse_arguments apply h,help -- "$@")"
+    tar -C /var/lib/barnyard/commit -czf - * | base64
+}
+
+# Here we add a gpg key. We also need a function to remove a key. We could use
+# a Barnyard module to remove a key, but then the user has to have one, write
+# one and if a key was compromised they'd want to remove it without running
+# Barnyard, because Barnyard could not be trusted until the key was revoked.
+
+barnyard_command_gpg_import() {
+    eval "$(barnyard_parse_arguments gpg_import "h,help" -- "$@")"
+
+    (( $EUID == 0 )) || abend 'must be run as root'
+
+    (( $# )) || abend 'a file name is required'
+
+    export GNUPGHOME=/etc/barnyard/gnupg
+
+    local filename=${1:-} gpg_key
+    if [[ "$filename" = - ]]; then
+        filename=/dev/stdin
+    fi
+    gpg_key=$(< "$filename") || abend 'unable to read gpg key'
+
+    local fingerprint=$( \
+        print -R "$gpg_key" | \
+            gpg --with-colons --import-options show-only --import --fingerprint 2>/dev/null | \
+            awk -F: '/^fpr/ { print $10; exit }' \
+    )
+
+    gpg --import <(print -R "$gpg_key") > /dev/null 2>&1 || abend 'unable to import key'
+    gpg --batch --yes --sign-key "$fingerprint" > /dev/null 2>&1 || abend 'unable to sign key'
+    gpg --list-keys
+}
+
+barnyard_command_gpg() {
+    eval "$(barnyard_parse_arguments gpg "h,help" -- "$@")"
+    barnyard_next_command gpg_ "$@"
+}
+
 # We could transfer this age encrypted, but we assume it is comming from
 # `barnctl` over SSH or at the very least from a file on the filesystem of the
 # host machine.
@@ -693,70 +762,6 @@ barnyard_command_ssh_private-key() {
 barnyard_command_ssh() {
     eval "$(barnyard_parse_arguments ssh "h,help" -- "$@")"
     barnyard_next_command ssh_ "$@"
-}
-
-# Could argue that the repository should never change, but it comes from outside
-# and so yes, it could change. You might want to rename your repository, why
-# not? It's not immutable like the age or gpg key.
-
-barnyard_command_clone() {
-    eval "$(barnyard_parse_arguments clone "h,help" -- "$@")"
-
-    (( $# )) || abend 'a git repository url is required'
-    local repository=${1:-}
-
-    [[ -e /etc/barnyard/id_barnyard ]] || abend 'no barnyard ssh key'
-
-    rm -rf /var/lib/barnyard/repository
-
-    export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
-
-    git clone -q "${repository%#*}" /var/lib/barnyard/repository || abend 'unable to clone repository %s' "$repository"
-
-    local branch="${repository##*#}"
-    if [[ -z "$branch" ]]; then
-        branch=$(git rev-parse --abbrev-ref HEAD) || abend 'unable to determin branch for %s' "$repository"
-    else
-        git -C /var/lib/barnyard/repository checkout  "$branch" || abend 'unable to checkout branch %s' "$branch"
-    fi
-
-    print -R "branch=$branch" > /etc/barnyard/config
-}
-
-# Here we add a gpg key. We also need a function to remove a key. We could use
-# a Barnyard module to remove a key, but then the user has to have one, write
-# one and if a key was compromised they'd want to remove it without running
-# Barnyard, because Barnyard could not be trusted until the key was revoked.
-
-barnyard_command_gpg_import() {
-    eval "$(barnyard_parse_arguments gpg_import "h,help" -- "$@")"
-
-    (( $EUID == 0 )) || abend 'must be run as root'
-
-    (( $# )) || abend 'a file name is required'
-
-    export GNUPGHOME=/etc/barnyard/gnupg
-
-    local filename=${1:-} gpg_key
-    if [[ "$filename" = - ]]; then
-        filename=/dev/stdin
-    fi
-    gpg_key=$(< "$filename") || abend 'unable to read gpg key'
-
-    local fingerprint=$( \
-        print -R "$gpg_key" | \
-            gpg --with-colons --import-options show-only --import --fingerprint 2>/dev/null | \
-            awk -F: '/^fpr/ { print $10; exit }' \
-    )
-
-    gpg --import <(print -R "$gpg_key") > /dev/null 2>&1 || abend 'unable to import key'
-    gpg --batch --yes --sign-key "$fingerprint" > /dev/null 2>&1 || abend 'unable to sign key'
-    gpg --list-keys
-}
-
-barnyard_command_gpg() {
-    eval "$(barnyard_parse_arguments gpg "h,help" -- "$@")"
-    barnyard_next_command gpg_ "$@"
 }
 
 _barnyard_command_status() {

@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-BARNCTL_VERSION=0.1.0
+VERSION=0.2.0
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -266,10 +266,16 @@ barnctl_shell_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
 
-_barnctl_get_server() {
-    local server="$1" user="$2"
-    [[ -z "$user" ]] && print -R "$server"
-    print -R "$user@$server"
+barnctl_command_apply() {
+    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    local server=${1:-}
+
+    ssh "$server" '/usr/bin/sudo /usr/local/bin/barnyard apply'
 }
 
 # For when you forget the SSH protocol. SSH will invoke a shell with the `-c`
@@ -289,13 +295,6 @@ barnctl_command_bootstrap() {
     EOF
 
     local server=${1:-}
-
-    barnctl_quotedoc<<'    EOF'
-        known: ${o_known[1]}
-        ssh: ${o_ssh[1]}
-        gpg: ${o_gpg[@]}
-        clone: ${o_clone[1]}
-    EOF
 
     {
         if (( ${#o_known[@]} )); then
@@ -323,6 +322,45 @@ assert_barnyard_directory() {
     [[ -d age && -d users && -d machines && -d modules && -d resources ]] || abend<<'    EOF'
         error: barnyard utilties must be run in the barnyard directory
     EOF
+}
+
+barnctl_command_commit() {
+    eval "$(barnctl_parse_arguments commit "h,help" -- "$@")"
+
+    assert_barnyard_directory
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    local server=${1:-}
+
+    ssh "$server" '/usr/local/bin/barnyard commit'
+}
+
+barnctl_command_configure() {
+    eval "$(barnctl_parse_arguments apply "h,help" "f,force" -- "$@")"
+    local hostname=${1:-}
+    shift
+    [[ -d age && -d machines && -d modules ]] || abend<<'    EOF'
+        error: barnyard utilties must be run in the barnyard directory
+    EOF
+    [[ -d "machines/$hostname" ]] || abend<<'    EOF'
+        error: hostname configuration not found
+    EOF
+    declare -a modules
+    if [[ $# -eq 0 ]]; then
+        for module in machines/$hostname/*; do
+            modules+=(${module##*/})
+        done
+    else
+        modules=("$@")
+    fi
+    for module in "${modules[@]}"; do
+        if [[ -e modules/$module/configure.zsh ]]; then
+            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module $o_force || exit 1
+        fi
+    done
 }
 
 barnctl_command_generate() {
@@ -418,83 +456,6 @@ barnctl_command_generate() {
     done
 }
 
-barnctl_command_commit() {
-    eval "$(barnctl_parse_arguments commit "h,help" -- "$@")"
-
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
-
-    local server=${1:-}
-
-    ssh "$server" '/usr/bin/sudo /bin/bash' << '    EOF'
-        cd /var/lib/barnyard/commit && tar -czf - * | base64
-    EOF
-}
-
-barnctl_command_update() {
-    eval "$(barnctl_parse_arguments update "h,help" -- "$@")"
-
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
-
-    local server=${1:-}
-
-    {
-        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOF"'"
-        cat "${SCRIPT_DIR}/barnyard"
-        print -R 'EOF'
-        print -R ')'
-        print -R ''
-        barnctl_shell_resource barnctl_update
-    } | ssh "$server" '/usr/bin/sudo /bin/bash'
-}
-
-barnctl_command_prepare() {
-    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
-
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
-
-    local server=${1:-}
-
-    {
-        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
-        cat "${SCRIPT_DIR}/barnyard"
-        print -R 'EOS'
-        print -R ')'
-        print -R ''
-        barnctl_shell_resource barnctl_prepare
-    } | ssh "$server" '/usr/bin/sudo /bin/bash'
-}
-
-barnctl_command_configure() {
-    eval "$(barnctl_parse_arguments apply "h,help" "f,force" -- "$@")"
-    local hostname=${1:-}
-    shift
-    [[ -d age && -d machines && -d modules ]] || abend<<'    EOF'
-        error: barnyard utilties must be run in the barnyard directory
-    EOF
-    [[ -d "machines/$hostname" ]] || abend<<'    EOF'
-        error: hostname configuration not found
-    EOF
-    declare -a modules
-    if [[ $# -eq 0 ]]; then
-        for module in machines/$hostname/*; do
-            modules+=(${module##*/})
-        done
-    else
-        modules=("$@")
-    fi
-    for module in "${modules[@]}"; do
-        if [[ -e modules/$module/configure.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module $o_force || exit 1
-        fi
-    done
-}
-
 barnctl_command_gpg_import() {
     eval "$(barnctl_parse_arguments gpg_import "u,user:" "h,help" -- "$@")"
 
@@ -519,12 +480,7 @@ barnctl_command_gpg() {
     barnctl_next_command gpg_ "$@"
 }
 
-barnctl_command_version() {
-    eval "$(barnctl_parse_arguments version "h,help" -- "$@")"
-    print -R $BARNCTL_VERSION
-}
-
-barnctl_command_apply() {
+barnctl_command_prepare() {
     eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
@@ -533,39 +489,43 @@ barnctl_command_apply() {
 
     local server=${1:-}
 
-    ssh "$server" '/usr/bin/sudo /usr/local/bin/barnyard apply'
+    {
+        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
+        sed 's/VERSION=.*/VERSION='$VERSION'/' "${SCRIPT_DIR}/barnyard"
+        print -R 'EOS'
+        print -R ')'
+        print -R ''
+        barnctl_shell_resource barnctl_prepare
+    } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
-acrectl_string_resource() {
-    awk '/^# ___ '$1' ___/{flag=1;next}/^# ___/{flag=0}flag' "$SCRIPT_DIR/barnctl" | sed -E 's/^# ?//g'
-}
+barnctl_command_update() {
+    eval "$(barnctl_parse_arguments update "h,help" -- "$@")"
 
-barnctl_command_arguments() {
-    barnctl_parse_arguments arguments ",long:" "s,:" "a,array@" "v,value:" "f,flag" -- "$@"
-}
-
-barnctl_command_quotedoc() {
-    local greeting=hello
-    barnctl_quotedoc <<'    EOF'
-        hello
-
-        $greeting
-
-        hello
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
     EOF
-local greeting=hello
-barnctl_quotedoc <<EOF
-hello
 
-$greeting
+    local server=${1:-}
 
-hello
-EOF
+    {
+        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOF"'"
+        sed 's/VERSION=.*/VERSION='$VERSION'/' "${SCRIPT_DIR}/barnyard"
+        print -R 'EOF'
+        print -R ')'
+        print -R ''
+        barnctl_shell_resource barnctl_update
+    } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
 main() {
     eval "$(barnctl_parse_arguments root "h,help" -- "$@")"
     barnctl_next_command "" "$@"
+}
+
+barnctl_command_version() {
+    eval "$(barnctl_parse_arguments version "h,help" -- "$@")"
+    print -R "$VERSION"
 }
 
 main "$@"
@@ -636,10 +596,10 @@ if [[ -e /usr/local/bin/barnyard ]]; then
     else
         version=$(grep '^VERSION=' /usr/local/bin/barnyard | sed 's/^VERSION=//')
     fi
-    echo "######### old VERSION $version ##########"
+    echo "existing version: $version"
     case "$version" in
         0.0.0 )
-            echo "######### apt-get install -y zsh ##########"
+            echo 'upgrade: 0.0.0 -> 0.1.0'
             apt-get install -y zsh
             if [[ ! -d /var/lib/barnyard && -d /var/barnyard ]]; then
                 echo "######### mv /var/barnyard /var/lib/barnyar ##########"
@@ -651,8 +611,7 @@ fi
 rm -f /usr/local/bin/barnyard
 echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
 chmod +x /usr/local/bin/barnyard
-version=$(grep '^VERSION=' /usr/local/bin/barnyard | sed 's/^VERSION=//')
-echo "######### new VERSION $version ##########"
+echo "new version: $(barnyard version)"
 ___ barnctl_configure ___
 
 source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barnctl")
