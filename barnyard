@@ -424,6 +424,12 @@ barnyard_quotedoc() {
 }
 
 ___
+barnyard_version_check() {
+    if (( ${#o_version[@]} )); then
+        [[ "$o_version[1]" == "$VERSION" ]] || abend "local=$o_version[1]" remote=$VERSION 'version mismatch, please run upgrade'
+    fi
+}
+
 barnyard_command_functions() {
     eval "$(barnyard_parse_arguments functions "h,help" -- "$@")"
     awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$1"
@@ -590,9 +596,7 @@ barnyard_configure() {
 _barnyard_command_apply() {
     declare -a o_modules=( "$@" )
 
-    if [[ -n "$o_version[1]" ]]; then
-        [[ "$o_version[1]" == "$VERSION" ]] || abend "local=$o_version[1]" remote=$VERSION 'version mismatch, please run update'
-    fi
+    barnyard_version_check
 
     if [[ $o_barnyard[stage] == production ]]; then
         git -C "${o_registers[barnyard]}" checkout -q "${o_barnyard[branch]}"
@@ -656,7 +660,9 @@ barnyard_command_apply() {
 # not? It's not immutable like the age or gpg key.
 
 barnyard_command_clone() {
-    eval "$(barnyard_parse_arguments clone "h,help" -- "$@")"
+    eval "$(barnyard_parse_arguments clone v,version: h,help -- "$@")"
+
+    barnyard_version_check
 
     (( $# )) || abend 'a git repository url is required'
     local repository=${1:-}
@@ -680,7 +686,8 @@ barnyard_command_clone() {
 }
 
 barnyard_command_commit() {
-    eval "$(barnyard_parse_arguments apply h,help -- "$@")"
+    eval "$(barnyard_parse_arguments apply v,version: h,help -- "$@")"
+    barnyard_version_check
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
 }
 
@@ -690,7 +697,9 @@ barnyard_command_commit() {
 # Barnyard, because Barnyard could not be trusted until the key was revoked.
 
 barnyard_command_gpg_import() {
-    eval "$(barnyard_parse_arguments gpg_import "h,help" -- "$@")"
+    eval "$(barnyard_parse_arguments gpg_import v,version: h,help -- "$@")"
+
+    barnyard_version_check
 
     (( $EUID == 0 )) || abend 'must be run as root'
 
@@ -725,7 +734,9 @@ barnyard_command_gpg() {
 # host machine.
 
 barnyard_command_ssh_known-hosts() {
-    eval "$(barnyard_parse_arguments ssh_known-hosts "h,help" -- "$@")"
+    eval "$(barnyard_parse_arguments ssh_known-hosts v,version: h,help -- "$@")"
+
+    barnyard_version_check
 
     (( $EUID == 0 )) || abend 'must be run as root'
 
@@ -744,7 +755,9 @@ barnyard_command_ssh_known-hosts() {
 }
 
 barnyard_command_ssh_private-key() {
-    eval "$(barnyard_parse_arguments ssh_private-key "h,help" -- "$@")"
+    eval "$(barnyard_parse_arguments ssh_private-key v,version: h,help -- "$@")"
+
+    barnyard_version_check
 
     (( $EUID == 0 )) || abend 'must be run as root'
 
@@ -770,6 +783,8 @@ barnyard_command_ssh() {
 
 _barnyard_command_status() {
     declare -A o_module
+
+    barnyard_version_check
 
     if ! (( $# )); then
         if [[ -z "${o_barnyard[checkout]}" ]]; then
@@ -798,7 +813,8 @@ _barnyard_command_status() {
 }
 
 barnyard_command_status() {
-    eval "$(barnyard_parse_arguments status "d,develop:" "h,help" -- "$@")"
+    eval "$(barnyard_parse_arguments status v,version d,develop: h,help -- "$@")"
+    barnyard_version_check
     barnyard_configure _barnyard_command_status "$@"
 }
 

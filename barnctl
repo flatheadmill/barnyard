@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.4.0
+VERSION=0.6.0
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -275,7 +275,7 @@ barnctl_command_apply() {
 
     local server=${1:-}
 
-    ssh "$server" '/usr/bin/sudo /usr/local/bin/barnyard apply'
+    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard apply --version $VERSION"
 }
 
 # For when you forget the SSH protocol. SSH will invoke a shell with the `-c`
@@ -298,22 +298,22 @@ barnctl_command_bootstrap() {
 
     {
         if (( ${#o_known[@]} )); then
-            print -R 'cat <<EOF | barnyard ssh known-hosts - || exit 1'
+            print -R 'cat <<EOF | barnyard ssh known-hosts --version='$VERSION' - || exit 1'
             cat "$o_known[1]"
             print -R EOF
         fi
         if (( ${#o_ssh[@]} )); then
-            print -R 'cat <<EOF | barnyard ssh private-key - || exit 1'
+            print -R 'cat <<EOF | barnyard ssh private-key --version='$VERSION' - || exit 1'
             cat "$o_ssh[1]"
             print -R EOF
         fi
         for gpg in "${o_gpg[@]}"; do
-            print -R 'cat <<EOF | barnyard gpg import - || exit 1'
+            print -R 'cat <<EOF | barnyard gpg import --version='$VERSION' - || exit 1'
             cat "$gpg"
             print -R EOF
         done
         if (( ${#o_clone[@]} )); then
-            print -R 'barnyard clone '"${o_clone[@]:q} || exit 1"
+            print -R 'barnyard clone --version='$VERSION' '"${o_clone[@]:q} || exit 1"
         fi
     } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
@@ -335,7 +335,7 @@ barnctl_command_commit() {
 
     local server=${1:-}
 
-    ssh "$server" '/usr/local/bin/barnyard commit'
+    ssh "$server" "/usr/local/bin/barnyard commit --version $VERSION"
 }
 
 barnctl_command_configure() {
@@ -454,30 +454,6 @@ barnctl_command_generate() {
             rm -f "age/$(basename $(dirname $machine))"
         fi
     done
-}
-
-barnctl_command_gpg_import() {
-    eval "$(barnctl_parse_arguments gpg_import "u,user:" "h,help" -- "$@")"
-
-    (( $# == 2 )) || abend <<'    EOF'
-        error: a hostname and file name are required
-    EOF
-
-    local hostname=${1:-}
-    shift
-
-    local filename=${1:-} gpg_key
-    shift
-    if [[ "$filename" = - ]]; then
-        filename=/dev/stdin
-    fi
-
-    ssh "$(_barnctl_get_server "$hostname" "${o_user[1]}")" sudo /usr/local/bin/barnyard gpg import -
-}
-
-barnctl_command_gpg() {
-    eval "$(barnctl_parse_arguments gpg "h,help" -- "$@")"
-    barnctl_next_command gpg_ "$@"
 }
 
 barnctl_command_prepare() {
