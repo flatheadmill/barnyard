@@ -558,6 +558,7 @@ barnyard_loop_modules() {
 
 barnyard_configure() {
     local next=${1:-}
+    shift
 
     if [[ ! -e /etc/barnyard/config ]]; then
         abend 'barnyard not installed'
@@ -579,6 +580,8 @@ barnyard_configure() {
             o_barnyard[checkout]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
         fi
     else
+        o_registers[barnyard]=$(readlink -f "$o_develop")
+
         [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
         [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
 
@@ -588,7 +591,6 @@ barnyard_configure() {
         [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[barnyard]:q}"
 
         o_barnyard[stage]=development
-        o_registers[barnyard]=$(readlink -f "$o_develop")
     fi
 
     $next "$@"
