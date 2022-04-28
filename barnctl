@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.3.0
+VERSION=0.4.0
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -499,8 +499,8 @@ barnctl_command_prepare() {
     } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
-barnctl_command_update() {
-    eval "$(barnctl_parse_arguments update "h,help" -- "$@")"
+barnctl_command_upgrade() {
+    eval "$(barnctl_parse_arguments upgrade "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
@@ -514,7 +514,9 @@ barnctl_command_update() {
         print -R 'EOF'
         print -R ')'
         print -R ''
-        barnctl_shell_resource barnctl_update
+        print -R 'VERSION='$VERSION
+        print -R ''
+        barnctl_shell_resource barnctl_upgrade
     } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
@@ -589,14 +591,21 @@ echo '######### install barnyard ##########'
 echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
 chmod 755 /usr/local/bin/barnyard
 barnyard version
-___ barnctl_update ___
+___ barnctl_upgrade ___
 if [[ -e /usr/local/bin/barnyard ]]; then
     if ! grep -q '^VERSION=' /usr/local/bin/barnyard; then
         version=0.0.0
     else
         version=$(grep '^VERSION=' /usr/local/bin/barnyard | sed 's/^VERSION=//')
     fi
-    echo "existing version: $version"
+else
+    version=$VERSION
+fi
+rm -f /usr/local/bin/barnyard
+echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
+chmod +x /usr/local/bin/barnyard
+echo "version: $version"
+if [[ "$version" != "$VERSION" ]]; then
     case "$version" in
         0.0.0 )
             echo 'upgrade: 0.0.0 -> 0.1.0'
@@ -605,13 +614,14 @@ if [[ -e /usr/local/bin/barnyard ]]; then
                 echo "######### mv /var/barnyard /var/lib/barnyar ##########"
                 mv /var/barnyard /var/lib/barnyard
             fi
+            version=0.1.0
             ;& # fall through
+        * )
+            echo "upgrade: $version -> $(barnyard version)"
+            ;;
     esac
+    echo "version: $(barnyard version)"
 fi
-rm -f /usr/local/bin/barnyard
-echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
-chmod +x /usr/local/bin/barnyard
-echo "new version: $(barnyard version)"
 ___ barnctl_configure ___
 
 source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barnctl")

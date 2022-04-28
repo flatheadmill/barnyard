@@ -681,7 +681,7 @@ barnyard_command_clone() {
 
 barnyard_command_commit() {
     eval "$(barnyard_parse_arguments apply h,help -- "$@")"
-    tar -C /var/lib/barnyard/commit -czf - * | base64
+    ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
 }
 
 # Here we add a gpg key. We also need a function to remove a key. We could use
