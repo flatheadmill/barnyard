@@ -590,6 +590,10 @@ barnyard_configure() {
 _barnyard_command_apply() {
     declare -a o_modules=( "$@" )
 
+    if [[ -n "$o_version[1]" ]]; then
+        [[ "$o_version[1]" == "$VERSION" ]] || abend "local=$o_version[1]" remote=$VERSION 'version mismatch, please run update'
+    fi
+
     if [[ $o_barnyard[stage] == production ]]; then
         git -C "${o_registers[barnyard]}" checkout -q "${o_barnyard[branch]}"
         git -C "${o_registers[barnyard]}" pull -q origin "$branch"
@@ -643,7 +647,7 @@ _barnyard_command_apply() {
 }
 
 barnyard_command_apply() {
-    eval "$(barnyard_parse_arguments apply d,develop: h,help -- "$@")"
+    eval "$(barnyard_parse_arguments apply v,version: d,develop: h,help -- "$@")"
     barnyard_configure _barnyard_command_apply "$@"
 }
 
