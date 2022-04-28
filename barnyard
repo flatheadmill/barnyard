@@ -22,20 +22,30 @@ zsh_parse_arguments() {
 
     declare -A argument_properties
 
-    local regex short long kind variable default
+    local regex short long kind variable default pattern prefix=o_
 
     while :
     do
         case "$1" in
-            --)
+            -p | --prefix )
+                prefix="$2"
+                shift 2
+                continue
+                ;;
+            -- )
                 shift
                 break
                 ;;
-            *)
-                regex='^([a-zA-Z0-9]?),([^!@:#]*)([!@:#]?)(=.*)?$'
-                [[ "$1" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
-                short=${match[1]} long=${match[2]} kind=${match[3]} variable= default="${match[4]}"
-                [[ -z "$long" ]] && variable=o_$short || variable=o_$long
+            * )
+                variable=${1%=*}
+                [[ "$variable" = "$1" ]] && variable=
+                pattern=${1#*=}
+                regex='^([a-zA-Z0-9]?),([^@:#]*)([@:#]?)(=.*)?$'
+                [[ "$pattern" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
+                short=${match[1]} long=${match[2]} kind=${match[3]} default="${match[4]}"
+                if [[ -z "$variable" ]]; then
+                    [[ -z "$long" ]] && variable=$prefix$short || variable=$prefix${long//-/_}
+                fi
                 if [[ "$default" != '' ]]; then
                     case x"$kind" in
                         x )
@@ -108,21 +118,9 @@ zsh_parse_arguments() {
                 let i=i+1
                 break
                 ;;
-            --no-* )
-                regex='^--no-([a-zA-Z0-9]+)$'
-                if [[ "${args[$i]}" =~ $regex ]] && [[ -n "${argument_properties[--$match[1]]}" ]]; then
-                    eval "${argument_properties[--$match[1]]}"
-                    if [[ $kind == toggle ]]; then
-                        args[$i]="--${match[1]}"
-                        print -R "$variable=0"
-                    fi
-                fi
-                echo "${argument_properties[--$match[1]]}"
-                echo "${match[1]}"
-                ;&
             --* )
                 arged=1
-                regex='^(--[a-zA-Z0-9]*)(=.*)?$'
+                regex='^(--[-a-zA-Z0-9]*)(=.*)?$'
                 [[ "${args[$i]}" =~ $regex ]] || { print -R "$error $context unknown ${1:q}"; return; }
                 long="${match[1]}"
                 if [[ "$match[2]" != '' ]]; then
@@ -134,6 +132,9 @@ zsh_parse_arguments() {
                 flag=$long
                 [[ -z "${argument_properties[$long]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
                 eval "${argument_properties[$long]}"
+                if [[ $kind == toggle && "$long" =~ no- ]]; then
+                    print -R "$variable=0"
+                fi
                 ;;
             -* )
                 short="${args[$i]}"
@@ -143,10 +144,10 @@ zsh_parse_arguments() {
                 eval "${argument_properties[$short]}"
                 case "$kind" in
                     array | value )
-                        if [[ ${#short} -eq 2 ]]; then
+                        if [[ ${#${args[$i]}} -eq 2 ]]; then
                             let i=i+1
                         else
-                            args[i]=${short:2}
+                            args[i]=${${args[$i]}:2}
                         fi
                         ;;
                     * )
@@ -177,7 +178,7 @@ zsh_parse_arguments() {
                 print -R "let $variable=$variable+1"
                 ;;
             toggle )
-                print -R "[[ \$$variable -eq 0 ]] && $variable=1 || $variable=0"
+                print -R "[[ \$$variable -eq 0 ]] && $variable=1 || variable=0"
                 ;;
             value )
                 print -R "${variable}[1]=${args[$i]:q}"
