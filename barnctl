@@ -92,6 +92,9 @@ zsh_parse_arguments() {
     while [[ $i -le ${#args[@]} ]]
     do
         case "${args[$i]}" in
+            - )
+                break
+                ;;
             -- )
                 let i=i+1
                 break
@@ -269,39 +272,51 @@ _barnctl_get_server() {
     print -R "$user@$server"
 }
 
+# For when you forget the SSH protocol. SSH will invoke a shell with the `-c`
+# argument followed by a single command. If you want to pass arguments that
+# single command would be something like `sh -c 'program hello,\ world'`. This
+# is why we always generate a script and pipe to Bash. We know we get Bash and
+# not an arbitray user shell and we don't have to do argument parser. We won't
+# leak secrets by turning them into arguments for `ps` interception. Our
+# server-side `barnyard` executable has commands to simplify  the construction
+# of the scripts here.
+
 barnctl_command_bootstrap() {
-    eval "$(barnctl_parse_arguments bootstrap \
-        "h,help" \
-        "f,force" \
-        "u,user:" \
-        "p,fingerprint:" "G,github:" \
-        "b,branch:" "r,repository:" \
-        -- "$@")"
+    eval "$(barnctl_parse_arguments bootstrap h,help g,gpg@ k,known: s,ssh: c,clone: -- "$@")"
 
-    local server="$(_barnctl_get_server "$@" "${o_user[1]}")"
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
 
-#    local gpg_key=$(<"$o_gpg")
+    local server=${1:-}
 
-#    local fingerprint=$( \
-#        echo "$gpg_key" | \
-#            gpg --with-colons --import-options show-only --import --fingerprint | \
-#            awk -F: '/^fpr/ { print $10; exit }' \
-#    )
+    barnctl_quotedoc<<'    EOF'
+        known: ${o_known[1]}
+        ssh: ${o_ssh[1]}
+        gpg: ${o_gpg[@]}
+        clone: ${o_clone[1]}
+    EOF
 
-    _compile_script() {
-        echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
-        cat "${SCRIPT_DIR}/barnyard"
-        echo 'EOF'
-        echo '))'
-        echo 'GITHUB_KEY=$(< <(cat <<'"'"EOF"'"
-        cat "$o_github"
-        echo 'EOF'
-        echo '))'
-        barnctl_shell_resource barnctl_bootstrap
-    }
-
-    # https://unix.stackexchange.com/a/414640
-    _compile_script | ssh "$server" bash -s "$(printf " %q" "$o_repository" "$o_branch" "$o_fingerprint" "$o_force")"
+    {
+        if (( ${#o_known[@]} )); then
+            print -R 'cat <<EOF | barnyard ssh known-hosts - || exit 1'
+            cat "$o_known[1]"
+            print -R EOF
+        fi
+        if (( ${#o_ssh[@]} )); then
+            print -R 'cat <<EOF | barnyard ssh private-key - || exit 1'
+            cat "$o_ssh[1]"
+            print -R EOF
+        fi
+        for gpg in "${o_gpg[@]}"; do
+            print -R 'cat <<EOF | barnyard gpg import - || exit 1'
+            cat "$gpg"
+            print -R EOF
+        done
+        if (( ${#o_clone[@]} )); then
+            print -R 'barnyard clone '"${o_clone[@]:q} || exit 1"
+        fi
+    } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
 assert_barnyard_directory() {
@@ -404,33 +419,55 @@ barnctl_command_generate() {
 }
 
 barnctl_command_commit() {
-    eval "$(barnctl_parse_arguments commit "h,help" "u,user:" -- "$@")"
-    echo 'cd /var/lib/barnyard/commit && tar -czf - * | base64' | ssh "$(_barnctl_get_server "$@" "${o_user[1]}")" zsh
+    eval "$(barnctl_parse_arguments commit "h,help" -- "$@")"
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    local server=${1:-}
+
+    ssh "$server" '/usr/bin/sudo /bin/bash' << '    EOF'
+        cd /var/lib/barnyard/commit && tar -czf - * | base64
+    EOF
 }
 
 barnctl_command_update() {
-    eval "$(barnctl_parse_arguments update "h,help" "u,user:" -- "$@")"
+    eval "$(barnctl_parse_arguments update "h,help" -- "$@")"
 
-    _compile_script() {
-        # TODO Why two forms of substitution?
-        echo 'BARNYARD_SOURCE=$(< <(cat <<'"'"EOF"'"
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    local server=${1:-}
+
+    {
+        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOF"'"
         cat "${SCRIPT_DIR}/barnyard"
-        echo 'EOF'
-        echo '))'
-        echo ''
+        print -R 'EOF'
+        print -R ')'
+        print -R ''
         barnctl_shell_resource barnctl_update
-    }
-
-    _compile_script | ssh "$(_barnctl_get_server "$@" "${o_user[1]}")" bash
+    } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
 barnctl_command_prepare() {
-    eval "$(barnctl_parse_arguments prepare "h,help" "u,user:" -- "$@")"
+    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
     local server=${1:-}
-    if [[ ${#o_user[@]} -ne 0 ]]; then
-        server="${o_user[1]}@$server"
-    fi
-    barnctl_shell_resource barnctl_prepare | ssh "$server" bash
+
+    {
+        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
+        cat "${SCRIPT_DIR}/barnyard"
+        print -R 'EOS'
+        print -R ')'
+        print -R ''
+        barnctl_shell_resource barnctl_prepare
+    } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
 barnctl_command_configure() {
@@ -453,19 +490,50 @@ barnctl_command_configure() {
     fi
     for module in "${modules[@]}"; do
         if [[ -e modules/$module/configure.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module $o_force
+            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module $o_force || exit 1
         fi
     done
 }
 
+barnctl_command_gpg_import() {
+    eval "$(barnctl_parse_arguments gpg_import "u,user:" "h,help" -- "$@")"
+
+    (( $# == 2 )) || abend <<'    EOF'
+        error: a hostname and file name are required
+    EOF
+
+    local hostname=${1:-}
+    shift
+
+    local filename=${1:-} gpg_key
+    shift
+    if [[ "$filename" = - ]]; then
+        filename=/dev/stdin
+    fi
+
+    ssh "$(_barnctl_get_server "$hostname" "${o_user[1]}")" sudo /usr/local/bin/barnyard gpg import -
+}
+
+barnctl_command_gpg() {
+    eval "$(barnctl_parse_arguments gpg "h,help" -- "$@")"
+    barnctl_next_command gpg_ "$@"
+}
+
 barnctl_command_version() {
-    eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
+    eval "$(barnctl_parse_arguments version "h,help" -- "$@")"
     print -R $BARNCTL_VERSION
 }
 
 barnctl_command_apply() {
-    eval "$(barnctl_parse_arguments apply "h,help" "u,user:" -- "$@")"
-    ssh "$(_barnctl_get_server "$@" "${o_user[1]}")" sudo /usr/local/bin/barnyard
+    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    local server=${1:-}
+
+    ssh "$server" '/usr/bin/sudo /usr/local/bin/barnyard apply'
 }
 
 acrectl_string_resource() {
@@ -504,8 +572,11 @@ main "$@"
 
 exit
 
+# Any keys specific to the machine permanent and are never updated. If a key
+# specific to the machine is compromised, it means the machine is compromised,
+# because the key never leaves the machine.
+
 ___ barnctl_prepare ___
-cat <<'EOF' | sudo bash
 echo '######### apt update ##########'
 apt-get update && apt-get upgrade -y && apt-get -y autoremove
 echo '######### install zsh, gnupg2, git ##########'
@@ -520,99 +591,45 @@ echo "$age_tar" | base64 --decode | tar xz -O age/age > /usr/local/bin/age
 chmod +x /usr/local/bin/age
 echo "$age_tar" | base64 --decode | tar xz -O age/age-keygen > /usr/local/bin/age-keygen
 chmod +x /usr/local/bin/age-keygen
-echo '######### check age ##########'
 age --version
 echo '######### check age-keygen ##########'
 age-keygen --version
-echo '######### did this work? ##########'
-gpg --list-keys
-EOF
-___ barnctl_bootstrap ___
-abend() {
-    local message=$1
-    echo "$message" 1>&2
-    exit 1
-}
-
-cat <<'EOF' | sudo bash -s "$@" || exit 1
-set -e
-set -o pipefail
-
-force=$4
-
-if [[ ( -e /etc/barnyard || -e /var/lib/barnyard ) && "$force" != 0 ]]; then
-    echo "error: Barnyard already installed, use \`--force\` to overwrite." 1>&2
-    exit 2
+echo '######### generate age key ##########'
+mkdir -p /etc/barnyard
+if [[ ! -e /etc/barnyard/age ]]; then
+    age-keygen -o /etc/barnyard/age
 fi
-
-rm -f /usr/local/bin/barnyard
-rm -rf /etc/barnyard
-rm -rf /var/barnyard/repository # legacy
-rm -rf /var/lib/barnyard/repository
-rm -rf /root/.ssh
-
-mkdir -p /etc/barnyard
-mkdir -p /var/lib/barnyard
-
-while read -r key; do
-    if [[ "$key" =~ ^pub: ]]; then
-        IFS=':' read -r -a fields <<< "$key"
-        gpg --yes --batch --delete-keys "${fields[4]}"
-    fi
-done < <(gpg --list-public-keys --with-colons)
-EOF
-
-echo "$GITHUB_KEY" | sudo bash -c 'umask 077; cat /dev/stdin > /etc/barnyard/id_barnyard'
-
-cat <<'EOF' | sudo bash -s "$BARNYARD_SOURCE" "$@"
-set -e
-set -o pipefail
-
-source="$1"
-repository="$2"
-branch="$3"
-fingerprint="$4"
-
-abend() {
-    local message=$1
-    echo "$message" 1>&2
-    exit 1
-}
-
-cat <<EOC > /etc/barnyard/config
-repository=$repository
-branch=$branch
-fingerprint=$fingerprint
-EOC
-
-mkdir -p /etc/barnyard
-mkdir -p /var/lib/barnyard
-
-umask 077
-mkdir -p /root/.ssh
-umask 022
-
-known_github="github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg="
-echo "$known_github" > /root/.ssh/known_hosts
-
-rm -rf /var/lib/barnyard/repository
-GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes' \
-    git clone -qb "$branch" "$repository" /var/lib/barnyard/repository 2> /dev/null
-
-for key in $(find /var/lib/barnyard/repository/public_keys -name \*.asc); do
-    gpg --import "$key" 2>/dev/null >/dev/null
-done
-
-echo "$source" > /usr/local/bin/barnyard
-chmod +x /usr/local/bin/barnyard
-
-age-keygen -o /etc/barnyard/age 2>/dev/null
 mkdir -p /var/lib/barnyard/commit/age
-awk '/^# public key:/ { print $4 }' /etc/barnyard/age | tee /var/lib/barnyard/commit/age/$(hostname --long)
-EOF
+grep '^# public key: ' /etc/barnyard/age | sed 's/# public key: //' | tee /var/lib/barnyard/commit/age/$(hostname --long)
+echo '######### generate root private key ##########'
+( umask 077 && mkdir -p /etc/barnyard/gnupg )
+export GNUPGHOME=/etc/barnyard/gnupg
+key_details=$(cat <<EOD
+    %echo Generating a basic OpenPGP key
+    Key-Type: RSA
+    Key-Length: 2048
+    Subkey-Type: RSA
+    Subkey-Length: 2048
+    Name-Real: $(hostname --long)
+    Name-Comment: Root Personal Key
+    Name-Email: user@$(hostname --long)
+    Expire-Date: 0
+    %no-ask-passphrase
+    %no-protection
+    # Do a commit here, so that we can later print "done" :-)
+    %commit
+    %echo done
+EOD
+)
+if ! gpg --list-keys $(hostname --long); then
+    gpg --verbose --batch --gen-key <(echo "$key_details")
+fi
+gpg --list-keys
+echo '######### install barnyard ##########'
+echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
+chmod 755 /usr/local/bin/barnyard
+barnyard version
 ___ barnctl_update ___
-cat <<'EOF' | sudo bash -s "$BARNYARD_SOURCE"
-source="$1"
 if [[ -e /usr/local/bin/barnyard ]]; then
     if ! grep -q '^VERSION=' /usr/local/bin/barnyard; then
         version=0.0.0
@@ -632,11 +649,10 @@ if [[ -e /usr/local/bin/barnyard ]]; then
     esac
 fi
 rm -f /usr/local/bin/barnyard
-echo "$source" > /usr/local/bin/barnyard
+echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
 chmod +x /usr/local/bin/barnyard
 version=$(grep '^VERSION=' /usr/local/bin/barnyard | sed 's/^VERSION=//')
 echo "######### new VERSION $version ##########"
-EOF
 ___ barnctl_configure ___
 
 source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barnctl")
@@ -769,9 +785,18 @@ machine() {
                 barnctl_quotedoc >> "$filename"
                 ;;
             * )
-                abend <<'                EOF'
-                    error: unknown module value $1"
-                EOF
+                case "$1" in
+                    %* )
+                        for key value in "${@(kv){(P)${1#%}}}"; do
+                            print -R "$key+=" >> "$filename"
+                        done
+                        ;;
+                    * )
+                        abend <<'                        EOF'
+                            error: unknown module value $1"
+                        EOF
+                        ;;
+                esac
                 ;;
         esac
         shift
