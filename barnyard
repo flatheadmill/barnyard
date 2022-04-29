@@ -432,8 +432,8 @@ barnyard_version_check() {
 }
 
 barnyard_command_functions() {
-    eval "$(barnyard_parse_arguments functions "h,help" -- "$@")"
-    awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$1"
+    eval "$(barnyard_parse_arguments functions h,help -- "$@")"
+    barnyard_bash_resource barnyard_common
 }
 
 barnyard_clone() {
@@ -695,6 +695,17 @@ barnyard_command_commit() {
     eval "$(barnyard_parse_arguments apply v,version: h,help -- "$@")"
     barnyard_version_check
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
+}
+
+barnyard_command_exec() {
+    eval "$(barnyard_parse_arguments exec v,version: h,help -- "$@")"
+    barnyard_version_check
+    local program=${1:-}
+    shift
+    if [[ "$program" = /* ]]; then
+        export BARNYARD_PATH=$SCRIPT_DIR
+        "$program" "$@"
+    fi
 }
 
 # Here we add a gpg key. We also need a function to remove a key. We could use
