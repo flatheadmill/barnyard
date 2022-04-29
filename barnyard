@@ -440,7 +440,7 @@ barnyard_clone() {
     local directory="$BARNYARD_TEMP/$1"
     mkdir -p "$directory"
     if [[ "$o_barnyard[stage]" == production ]]; then
-        git -C "$o_registers[barnyard]" archive "${o_barnyard[checkout]}" | tar -C "$directory" -x
+        git -C "$o_registers[barnyard]" archive "${o_barnyard[sha1]}" | tar -C "$directory" -x
     else
         cp -R "$o_registers[barnyard]"/* "$directory"
     fi
@@ -490,13 +490,13 @@ barnyard_run() {
             diff | cron )
                 if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
                     read -r -A applied < "/var/lib/barnyard/applied/$module"
-                    if [[ "$applied[1]" = "$o_barnyard[checkout]" ]]; then
+                    if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
                         log module="$module" "already applied module %s" "$module"
                         return 0
                     fi
                     barnyard_get_array o_module _diff diffs
                     diffs+=("machines/$o_barnyard[hostname]/$module")
-                    if git -C "$o_registers[barnyard]" diff --quiet "$applied[1]" "$o_barnyard[checkout]" -- "${diffs[@]}"; then
+                    if git -C "$o_registers[barnyard]" diff --quiet "$applied[1]" "$o_barnyard[sha1]" -- "${diffs[@]}"; then
                         log module="$module" "module %s has not changed, skipping" "$module"
                         return 0
                     fi
@@ -519,7 +519,7 @@ barnyard_run() {
 
     if [[ "$o_barnyard[stage]" == production ]]; then
         log module="$module" "marking module %s as applied" "$module"
-        git -C "$o_registers[barnyard]" log -n 1 --format='%H %at' "$o_barnyard[checkout]" > "/var/lib/barnyard/applied/$module"
+        git -C "$o_registers[barnyard]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
     fi
 }
 
@@ -577,7 +577,7 @@ barnyard_configure() {
         o_registers[barnyard]=/var/lib/barnyard/repository
 
         if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
-            o_barnyard[checkout]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
+            o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
         fi
     else
         o_registers[barnyard]=$(readlink -f "$o_develop")
@@ -611,8 +611,8 @@ _barnyard_command_apply() {
 
         local sha1
         typeset -a current
-        if [[ -n "$o_barnyard[checkout]" ]]; then
-            read -r -A current <<< "$(git -C ${o_registers[barnyard]} log -n 1 --format='%H %at' "$o_barnyard[checkout]")"
+        if [[ -n "$o_barnyard[sha1]" ]]; then
+            read -r -A current <<< "$(git -C ${o_registers[barnyard]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
         fi
 
         if [[ "${#current[@]}" -eq 0 ]]; then
@@ -638,7 +638,7 @@ _barnyard_command_apply() {
 
         # https://stackoverflow.com/a/21941473
         if [[ "${#checkout[@]}" -ne 0 ]]; then
-            o_barnyard[checkout]="${checkout[1]}"
+            o_barnyard[sha1]="${checkout[1]}"
             o_barnyard[stage]=production
 
             local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
@@ -850,15 +850,15 @@ _barnyard_command_status() {
     barnyard_version_check
 
     if ! (( $# )); then
-        if [[ -z "${o_barnyard[checkout]}" ]]; then
+        if [[ -z "${o_barnyard[sha1]}" ]]; then
             log 'barnyard not yet applied'
         else
-            log 'barnyard applied %s' "${o_barnyard[checkout]}"
+            log 'barnyard applied %s' "${o_barnyard[sha1]}"
         fi
         return 0
     fi
 
-    [[ -z "$o_barnyard[checkout]" ]] && abend 'barnyard not yet applied'
+    [[ -z "$o_barnyard[sha1]" ]] && abend 'barnyard not yet applied'
 
     barnyard_clone_directory
 
