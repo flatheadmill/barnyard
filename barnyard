@@ -400,9 +400,9 @@ barnyard_divider() {
     local bar=--------------------------------------------------------------------------------
     shift
     local prefix="------- $label "
-    echo "$bar"
-    echo "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
-    echo "$bar"
+    print -R "$bar"
+    print -R "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
+    print -R "$bar"
 }
 
 barnyard_quotedoc() {
@@ -728,6 +728,66 @@ barnyard_command_gpg_import() {
 barnyard_command_gpg() {
     eval "$(barnyard_parse_arguments gpg "h,help" -- "$@")"
     barnyard_next_command gpg_ "$@"
+}
+
+barnyard_install_age() {
+    cd "$BARNYARD_TEMP"
+    curl -sLO https://github.com/FiloSottile/age/releases/download/v1.0.0/age-v1.0.0-linux-amd64.tar.gz
+    tar zxf age-v1.0.0-linux-amd64.tar.gz
+    find .
+    install -m 755 age/age /usr/local/bin/age
+    install -m 755 age/age-keygen /usr/local/bin/age-keygen
+    age --version
+}
+
+barnyard_command_prepare() {
+    eval "$(barnyard_parse_arguments prepare "h,help" -- "$@")"
+    barnyard_divider 'check gpg'
+    gpg --version
+    barnyard_divider 'check git'
+    git --version
+    barnyard_divider 'install age'
+    barnyard_temporary_directory
+    (barnyard_install_age)
+    barnyard_divider 'check age'
+    age --version
+    barnyard_divider 'check age-keygen'
+    age-keygen --version
+    barnyard_divider 'generate age key'
+    mkdir -p /etc/barnyard
+    if [[ ! -e /etc/barnyard/age ]]; then
+        age-keygen -o /etc/barnyard/age
+    fi
+    mkdir -p /var/lib/barnyard/commit/age
+    grep '^# public key: ' /etc/barnyard/age | sed 's/# public key: //' | tee /var/lib/barnyard/commit/age/$(hostname --long)
+    barnyard_divider 'generate root private key'
+    ( umask 077 && mkdir -p /etc/barnyard/gnupg )
+    export GNUPGHOME=/etc/barnyard/gnupg
+    barnyard_quotedoc <<'    EOF' > "$BARNYARD_TEMP/key_details"
+        %echo Generating a basic OpenPGP key
+        Key-Type: RSA
+        Key-Length: 2048
+        Subkey-Type: RSA
+        Subkey-Length: 2048
+        Name-Real: $(hostname --long)
+        Name-Comment: Root Personal Key
+        Name-Email: user@$(hostname --long)
+        Expire-Date: 0
+        %no-ask-passphrase
+        %no-protection
+        # Do a commit here, so that we can later print "done" :-)
+        %commit
+        %echo done
+    EOF
+    gpg --list-keys
+    echo --------
+    hostname --long
+    gpg --list-keys $(hostname --long)
+    echo --------
+    if ! gpg --list-keys $(hostname --long); then
+        gpg --verbose --batch --gen-key "$BARNYARD_TEMP/key_details"
+    fi
+    gpg --list-keys
 }
 
 # We could transfer this age encrypted, but we assume it is comming from

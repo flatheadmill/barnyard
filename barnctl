@@ -516,58 +516,24 @@ exit
 # because the key never leaves the machine.
 
 ___ barnctl_prepare ___
-echo '######### apt update ##########'
+barnyard_divider() {
+    local label=${1:-}
+    local bar=--------------------------------------------------------------------------------
+    shift
+    local prefix="------- $label "
+    echo "$bar"
+    echo "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
+    echo "$bar"
+}
+barnyard_divider 'apt update'
 apt-get update && apt-get upgrade -y && apt-get -y autoremove
-echo '######### install zsh, gnupg2, git ##########'
+barnyard_divider 'install zsh, gnupg2, git'
 apt-get install -y zsh gnupg2 git
-echo '######### check gpg ##########'
-gpg --version
-echo '######### check git ##########'
-git --version
-echo '######### install age ##########'
-age_tar=$(curl -sL https://github.com/FiloSottile/age/releases/download/v1.0.0/age-v1.0.0-linux-amd64.tar.gz | base64)
-echo "$age_tar" | base64 --decode | tar xz -O age/age > /usr/local/bin/age
-chmod +x /usr/local/bin/age
-echo "$age_tar" | base64 --decode | tar xz -O age/age-keygen > /usr/local/bin/age-keygen
-chmod +x /usr/local/bin/age-keygen
-age --version
-echo '######### check age-keygen ##########'
-age-keygen --version
-echo '######### generate age key ##########'
-mkdir -p /etc/barnyard
-if [[ ! -e /etc/barnyard/age ]]; then
-    age-keygen -o /etc/barnyard/age
-fi
-mkdir -p /var/lib/barnyard/commit/age
-grep '^# public key: ' /etc/barnyard/age | sed 's/# public key: //' | tee /var/lib/barnyard/commit/age/$(hostname --long)
-echo '######### generate root private key ##########'
-( umask 077 && mkdir -p /etc/barnyard/gnupg )
-export GNUPGHOME=/etc/barnyard/gnupg
-key_details=$(cat <<EOD
-    %echo Generating a basic OpenPGP key
-    Key-Type: RSA
-    Key-Length: 2048
-    Subkey-Type: RSA
-    Subkey-Length: 2048
-    Name-Real: $(hostname --long)
-    Name-Comment: Root Personal Key
-    Name-Email: user@$(hostname --long)
-    Expire-Date: 0
-    %no-ask-passphrase
-    %no-protection
-    # Do a commit here, so that we can later print "done" :-)
-    %commit
-    %echo done
-EOD
-)
-if ! gpg --list-keys $(hostname --long); then
-    gpg --verbose --batch --gen-key <(echo "$key_details")
-fi
-gpg --list-keys
-echo '######### install barnyard ##########'
+barnyard_divider 'install barnyard'
 echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
 chmod 755 /usr/local/bin/barnyard
 barnyard version
+barnyard prepare
 ___ barnctl_upgrade ___
 if [[ -e /usr/local/bin/barnyard ]]; then
     if ! grep -q '^VERSION=' /usr/local/bin/barnyard; then
