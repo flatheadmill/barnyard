@@ -481,6 +481,9 @@ barnyard_run() {
 
     if [[ "$o_barnyard[stage]" == production ]]; then
         case "$o_module[_apply]" in
+            always )
+                log module="$module" "module % run set to always, applying" "$module"
+                ;;
             once )
                 if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
                     log module="$module" "already applied module %s" "$module"
