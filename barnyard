@@ -386,7 +386,9 @@ log() {
         context="; ${(j:, :)syslog}"
     fi
 
-    print -R "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
+    if [[ -z "$o_barnyard[quiet]" ]]; then
+        print -R "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
+    fi
 
     local id
     id=$(print -R "$SALT" "$format" | md5sum | cut -d' ' -f1)
@@ -395,7 +397,16 @@ log() {
     print "${(j:\n:)journald}" | logger --journald
 }
 
+barnyard_display() {
+    if [[ -z "$o_barnyard[quiet]" ]]; then
+        cat /dev/stdin 2>&1
+    else
+        cat /dev/stdin > /dev/null
+    fi
+}
+
 barnyard_divider() {
+    [[ -n "$o_barnyard[quiet]" ]] && return
     local label="$1"
     local bar=--------------------------------------------------------------------------------
     shift
@@ -571,6 +582,7 @@ barnyard_configure() {
     barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)"
     o_barnyard[hostname]=$(hostname --long)
     typeset -A o_registers
+    [[ $o_quiet -eq 0 ]] && o_barnyard[quiet]=0
     if [[ -z "$o_develop" ]]; then
         o_barnyard[stage]=production
 
@@ -657,7 +669,7 @@ _barnyard_command_apply() {
 }
 
 barnyard_command_apply() {
-    eval "$(barnyard_parse_arguments apply v,version: d,develop: h,help -- "$@")"
+    eval "$(barnyard_parse_arguments apply v,version: d,develop: q,quiet h,help -- "$@")"
     barnyard_configure _barnyard_command_apply "$@"
 }
 
