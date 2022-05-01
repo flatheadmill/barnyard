@@ -12,9 +12,9 @@ ___() {
 # TODO Cannot remember all that I wanted to do with property names, but it seems
 # like all I need are the directives and based64 encoding. Maybe include is
 # something like `@/modules/postgresql/common`.
-SCRIPT_DIR=${${0:a}%/*}
+export BARNYARD_PATH=${${0:a}%/*}
 
-VERSION=$(zsh $SCRIPT_DIR/barnctl version)
+VERSION=$(zsh $BARNYARD_PATH/barnctl version)
 
 zsh_parse_arguments() {
     local error=${${1:-}:q} context=${${2:-}:q}
@@ -205,7 +205,7 @@ barnyard_parse_arguments() {
 }
 
 IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
-    sed -n 's/^barnyard_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnyard" \
+    sed -n 's/^barnyard_command_\(.*\)() {$/\1/p' "$BARNYARD_PATH/barnyard" \
 )
 
 barnyard_next_command() {
@@ -232,6 +232,8 @@ barnyard_next_command() {
 # TODO `cd` to the barnyard directory and make that the working directory of a
 # barnyard script.
 
+___ barnyard_temporary_directory ___
+
 barnyard_cleanup() {
     [[ -n "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
 }
@@ -245,38 +247,28 @@ barnyard_temporary_directory() {
 trap barnyard_cleanup EXIT
 
 ___ barnyard_common ___
+typeset -A PRIORITY
 
-__barnyard_priorities() {
-    local func=${1:-exit}
+PRIORITY[panic]=0
+PRIORITY[alert]=1
+PRIORITY[crit]=2
+PRIORITY[err]=3
+PRIORITY[warn]=4
+PRIORITY[notice]=5
+PRIORITY[info]=6
+PRIORITY[debug]=7
 
-    shift
+if [[ -n "$BARNYARD_LOG_LEVEL" ]]; then
+    [[ -z "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]] && abend "invalid log level %s" "$BARNYARD_LOG_LEVEL"
+else
+    BARNYARD_LOG_LEVEL=info
+fi
 
+# An environment variable so someone can set this in their shell.
+export BARNYARD_LOG_LEVEL
 
-    declare -A PRIORITY
-
-    PRIORITY[panic]=0
-    PRIORITY[alert]=1
-    PRIORITY[crit]=2
-    PRIORITY[err]=3
-    PRIORITY[warn]=4
-    PRIORITY[notice]=5
-    PRIORITY[info]=6
-    PRIORITY[debug]=7
-
-    if [[ -n "$BARNYARD_LOG_LEVEL" ]]; then
-        [[ -z "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]] && abend "invalid log level %s" "$BARNYARD_LOG_LEVEL"
-    else
-        BARNYARD_LOG_LEVEL=info
-    fi
-
-    # An environment variable so someone can set this in their shell.
-    export BARNYARD_LOG_LEVEL
-
-    "$func" "$@"
-}
-
-barnyard_bash_resource() {
-    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnyard"
+barnyard_zsh_resource() {
+    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard"
 }
 
 barnyard_write_config() {
@@ -454,7 +446,7 @@ barnyard_version_check() {
 
 barnyard_command_functions() {
     eval "$(barnyard_parse_arguments functions h,help -- "$@")"
-    barnyard_bash_resource barnyard_common
+    barnyard_zsh_resource barnyard_common
 }
 
 barnyard_clone() {
@@ -473,7 +465,7 @@ barnyard_clone_directory() {
     mkdir -p "$BARNYARD_TEMP/barnyard"
     mkdir -p "$BARNYARD_TEMP/modules"
 
-    barnyard_bash_resource barnyard_run > "$BARNYARD_TEMP/run"
+    barnyard_zsh_resource barnyard_apply > "$BARNYARD_TEMP/apply"
 }
 
 barnyard_run() {
@@ -537,7 +529,7 @@ barnyard_run() {
     o_barnyard[module]="$module"
     export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)o_barnyard}}"
     export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
-    zsh "$BARNYARD_TEMP/run" "$SCRIPT_DIR/barnyard" "${o_barnyard[barnyard]}/modules/$o_module[_module]/apply.zsh"
+    zsh "$BARNYARD_TEMP/apply" "${o_barnyard[barnyard]}/modules/$o_module[_module]/apply.zsh"
     local code=$?
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
 
@@ -719,15 +711,25 @@ barnyard_command_commit() {
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
 }
 
+barnyard_command() {
+    echo called
+}
+
+# If you want to execute a `zsh` in the `libexec` directory with just the
+# environment variables set then invoke it with `/usr/bin/zsh <path>`.
+
 barnyard_command_exec() {
     eval "$(barnyard_parse_arguments exec v,version: h,help -- "$@")"
     barnyard_version_check
     local program=${1:-}
     shift
-    if [[ "$program" = /* ]]; then
-        export BARNYARD_PATH=$SCRIPT_DIR
-        "$program" "$@"
+    if [[ "$program" = /usr/local/libexec/barnyard/*/*.zsh || "$program" != /* ]]; then
+        zsh <(barnyard_zsh_resource barnyard_exec) "$program" "$@"
+        exit $?
     fi
+
+    "$program" "$@"
+    exit $?
 }
 
 # Here we add a gpg key. We also need a function to remove a key. We could use
@@ -922,25 +924,24 @@ barnyard_command_version() {
     print -R "$VERSION"
 }
 
-root() {
+main() {
     eval "$(barnyard_parse_arguments root h,help -- "$@")"
     barnyard_next_command "" "$@"
 }
 
-__barnyard_priorities root "$@"
+main "$@"
 
 exit
+___ barnyard_apply ___
+source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
 
-___ barnyard_run ___
-source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$1")
-shift
+typeset -A o_barnyard=( ${(@Q)${(@z)__BARNYARD_O_BARNYARD__}} ) o_module=( ${(@Q)${(@z)__BARNYARD_O_MODULE__}} )
+unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
 
-main() {
-    unset -f main __barnyard_priorities
-    typeset -A o_barnyard=( ${(@Q)${(@z)__BARNYARD_O_BARNYARD__}} ) o_module=( ${(@Q)${(@z)__BARNYARD_O_MODULE__}} )
-    unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
-    . "$1"
-}
+. "$1"
+___ barnyard_exec ___
+source <(awk '/^___ barnyard_temporary_directory ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
+source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
 
-__barnyard_priorities main "$@"
+. "$1"
 ___
