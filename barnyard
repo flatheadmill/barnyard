@@ -222,6 +222,16 @@ barnyard_next_command() {
     EOF
 }
 
+# TODO Can I make these reusable? How about if you run `exec` as program these
+# get imported, but if you run `exec` as module they get created by the
+# launcher? LOL. Either way they are always there. Oh, wait...
+#
+# So, maybe exec runs without creating the barnyard environment and putting you
+# in that as the working directory. That would be the only difference.
+#
+# TODO `cd` to the barnyard directory and make that the working directory of a
+# barnyard script.
+
 barnyard_cleanup() {
     [[ -n "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
 }
