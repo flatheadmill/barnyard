@@ -215,17 +215,35 @@ barnctl_next_command() {
 
 ___ barnctl_common ___
 
+barnctl_get_array() {
+    [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
+}
+
 barnctl_read_config_() {
-    local file=${2:-} regex='^([^=]+)=(.*)$' line
+    local file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
     shift 2
     while [[ $# -ne 0 ]]; do
         barnctl_read_config[$1]=${2:-}
         shift 2
     done
+    declare -a array
     while read -r line; do
         [[ "$line" =~ $regex ]] || abend bad_config "$config"
-        local key=$match[1] value=$match[2]
-        barnctl_read_config[$key]="$value"
+        local key=$match[1] element_type=$match[2] value=$match[3]
+        case "$element_type" in
+            += )
+                if (( ${+barnctl_read_config[$key]} )); then
+                    array=("${(@Q)${(@z)barnctl_read_config[$key]}}")
+                else
+                    array=()
+                fi
+                array+=("$value")
+                barnctl_read_config[$key]="${(@qq)${array[@]}}"
+                ;;
+            = )
+                barnctl_read_config[$key]="$value"
+                ;;
+        esac
     done < "$file"
 }
 
