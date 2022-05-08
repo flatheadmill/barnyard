@@ -623,6 +623,7 @@ ___ barnctl_generate ___
                 key="${1/%=*/=}"
                 case "$key" in
                     *+= )
+                        echo 'yes, hello'
                         key="${key%+=}"
                         value="${1#*=}"
                         arrays[$key]=0
@@ -664,7 +665,7 @@ ___ barnctl_generate ___
 machine() {
     local hostname=${1:-}
     shift
-    __o_registers[hostname]="$hostname"
+    o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
     rm -rf "machines/${hostname}"
     mkdir -p "machines/${hostname}"
@@ -682,7 +683,7 @@ machine() {
         error: invalid module name $module
     EOF
     local filename key value
-    filename="machines/${__o_registers[hostname]}/$module"
+    filename="machines/${o_barnyard[hostname]}/$module"
     print -R "_order=$__o_registers[order]" > "$filename"
     while (( $# != 0 )); do
         if [[ -d "$1" ]]; then
@@ -697,10 +698,12 @@ machine() {
                 ;;
             *@= )
                 value="${1#*=}"
-                key="${1%%@=*}"
-                for value in "${(@P)value}"; do
-                    print -R "$key+=$value" >> "$filename"
-                done
+                if (( ${#${(@P)value}[@]} )); then
+                    key="${1%%@=*}"
+                    for value in "${(@P)value}"; do
+                        print -R "$key+=$value" >> "$filename"
+                    done
+                fi
                 ;;
             *+= | *\= )
                 print -R "$1" >> "$filename"
