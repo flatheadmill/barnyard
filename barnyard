@@ -511,6 +511,7 @@ barnyard_run() {
                         log module="$module" "already applied module %s" "$module"
                         return 0
                     fi
+                    # Can't use file globs on files that are not there.
                     barnyard_get_array o_module _diff diffs
                     diffs+=("machines/$o_barnyard[hostname]/$module")
                     while read -r file; do
