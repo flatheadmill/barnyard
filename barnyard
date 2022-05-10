@@ -490,6 +490,7 @@ barnyard_run() {
 
     mkdir -p /var/lib/barnyard/applied
 
+    local changed=0
     typeset -a applied diffs
 
     if [[ "$o_barnyard[stage]" == production ]]; then
@@ -512,7 +513,20 @@ barnyard_run() {
                     fi
                     barnyard_get_array o_module _diff diffs
                     diffs+=("machines/$o_barnyard[hostname]/$module")
-                    if git -C "$o_registers[barnyard]" diff --quiet "$applied[1]" "$o_barnyard[sha1]" -- "${diffs[@]}"; then
+                    while read -r file; do
+                        for diff in "${diffs[@]}"; do
+                            if [[ "$diff" = ^* ]]; then
+                                if [[ $file =~ $diff ]]; then
+                                    changed=1
+                                    break 2
+                                fi
+                            else [[ "$diff" = "$file" ]]; then
+                                changed=1
+                                break 2
+                            fi
+                        done
+                    done < <(git -C "$o_registers[barnyard]" diff --name-only "$applied[1]" "$o_barnyard[sha1]")
+                    if ! (( changed )); then
                         log module="$module" "module %s has not changed, skipping" "$module"
                         return 0
                     fi
