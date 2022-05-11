@@ -711,10 +711,6 @@ barnyard_command_commit() {
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
 }
 
-barnyard_command() {
-    echo called
-}
-
 # If you want to execute a `zsh` in the `libexec` directory with just the
 # environment variables set then invoke it with `/usr/bin/zsh <path>`.
 
