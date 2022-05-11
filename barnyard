@@ -521,7 +521,7 @@ barnyard_run() {
                                     changed=1
                                     break 2
                                 fi
-                            else [[ "$diff" = "$file" ]]; then
+                            elif [[ "$diff" = "$file" ]]; then
                                 changed=1
                                 break 2
                             fi
