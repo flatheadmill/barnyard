@@ -280,6 +280,10 @@ barnyard_write_config() {
     print "${(j:\n:)fields}" > "$file"
 }
 
+barnyard_get_array() {
+    [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
+}
+
 barnyard_read_config_() {
     local file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
     shift 2
@@ -306,10 +310,6 @@ barnyard_read_config_() {
                 ;;
         esac
     done < "$file"
-}
-
-barnyard_get_array() {
-    [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
 }
 
 barnyard_read_config() {
