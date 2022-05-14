@@ -588,7 +588,7 @@ barnyard_configure() {
     if (( ${#o_develop[@]} )); then
         o_barnyard[stage]=development
 
-        o_registers[barnyard]=$(readlink -f "$o_develop[0]")
+        o_registers[barnyard]=$(readlink -f "$o_develop[1]")
 
         [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
         [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
