@@ -585,7 +585,19 @@ barnyard_configure() {
     o_barnyard[hostname]=$(hostname --long)
     typeset -A o_registers
     [[ $o_quiet -eq 0 ]] && o_barnyard[quiet]=0
-    if [[ -z "$o_develop" ]]; then
+    if (( ${#o_develop[@]} )); then
+        o_barnyard[stage]=development
+
+        o_registers[barnyard]=$(readlink -f "$o_develop[0]")
+
+        [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
+        [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
+
+        local barnyard_user
+        barnyard_user=$(stat -c '%U' "${o_registers[barnyard]}/.git/index") || abend 'not a git repo %s' "$o_registers[barnyard]"
+
+        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[barnyard]:q}"
+    else
         o_barnyard[stage]=production
 
         export GNUPGHOME=/etc/barnyard/gnupg
@@ -596,18 +608,6 @@ barnyard_configure() {
         if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
             o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
         fi
-    else
-        o_registers[barnyard]=$(readlink -f "$o_develop")
-
-        [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
-        [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
-
-        local barnyard_user
-        barnyard_user=$(stat -c '%U' "${o_registers[barnyard]}/.git/index") || abend 'not a git repo %s' "$o_registers[barnyard]"
-
-        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[barnyard]:q}"
-
-        o_barnyard[stage]=development
     fi
 
     $next "$@"
