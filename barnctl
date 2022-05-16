@@ -285,6 +285,18 @@ barnctl_shell_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
 
+barnctl_command_always() {
+    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    local server=${1:-}
+
+    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard always --version $VERSION"
+}
+
 barnctl_command_apply() {
     eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
 

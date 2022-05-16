@@ -388,7 +388,7 @@ log() {
         context="; ${(j:, :)syslog}"
     fi
 
-    if [[ -z "$o_barnyard[quiet]" ]]; then
+    if ! (( $o_barnyard[quiet] )); then
         print -R "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
     fi
 
@@ -495,7 +495,7 @@ barnyard_run() {
 
     case "$o_module[_apply]" in
         always )
-            log module="$module" "module % run set to always, applying" "$module"
+            log module="$module" 'module %s run set to always, applying' "$module"
             ;;
         once )
             if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
@@ -532,7 +532,7 @@ barnyard_run() {
     local code=$?
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
 
-    if [[ "$o_barnyard[stage]" == production ]]; then
+    if [[ "$o_barnyard[barnyard]" = /var/lib/barnyard/repository ]]; then
         log module="$module" "marking module %s as applied" "$module"
         git -C "$o_registers[barnyard]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
     fi
@@ -573,31 +573,18 @@ barnyard_loop_modules() {
 
 barnyard_configure() {
     local always=${1:-} next=${2:-}
-    shift
+    shift 2
 
     if [[ ! -e /etc/barnyard/config ]]; then
         abend 'barnyard not installed'
     fi
 
-    typeset -A o_barnyard o_registers
-    barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)"
-    o_barnyard[hostname]=$(hostname --long)
-    [[ $o_quiet -eq 0 ]] && o_barnyard[quiet]=0
-    if (( ${#o_develop[@]} )); then
-        o_barnyard[stage]=development
-
-        o_registers[barnyard]=$(readlink -f "$o_develop[1]")
-        o_registers[always]=1
-
-        [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
-        [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
-
-        local barnyard_user
-        barnyard_user=$(stat -c '%U' "${o_registers[barnyard]}/.git/index") || abend 'not a git repo %s' "$o_registers[barnyard]"
-
-        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[barnyard]:q}"
-    else
+    typeset -A o_barnyard o_registers=( always $always barnyard "$(readlink -f "$barnyard[1]")" )
+    barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet 0
+    [[ $o_quiet = 0 ]] && o_barnyard[quiet]=1
+    if [[ "$o_barnyard[barnyard]" = "/var/lib/barnyard/repository" ]]; then
         o_barnyard[stage]=production
+    echo production && exit 1
         o_registers[always]=$always
 
         export GNUPGHOME=/etc/barnyard/gnupg
@@ -608,14 +595,22 @@ barnyard_configure() {
         if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
             o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
         fi
+    else
+        o_barnyard[stage]=development
+
+        [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
+        [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
+
+        local barnyard_user
+        barnyard_user=$(stat -c '%U' "${o_registers[barnyard]}/.git/index") || abend 'not a git repo %s' "$o_registers[barnyard]"
+
+        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[barnyard]:q}"
     fi
 
     $next "$@"
 }
 
 _barnyard_command_apply() {
-    local always=${1:-}
-    shift
     declare -a o_modules=( "$@" )
 
     o_registers[always]=$always
@@ -676,12 +671,13 @@ _barnyard_command_apply() {
 
 # TODO --develop becomes --barnyard and you can only run it with always.
 barnyard_command_always() {
-    eval "$(barnyard_parse_arguments apply v,version: d,develop: q,quiet h,help -- "$@")"
+    eval "$(barnyard_parse_arguments apply v,version: barnyard=b,barnyard: q,quiet h,help -- "$@")"
     barnyard_configure 1 _barnyard_command_apply "$@"
 }
 
 barnyard_command_apply() {
     eval "$(barnyard_parse_arguments apply v,version: d,develop: q,quiet h,help -- "$@")"
+    typeset -a barnyard=( /var/lib/barnyard/repository )
     barnyard_configure 0 _barnyard_command_apply "$@"
 }
 
