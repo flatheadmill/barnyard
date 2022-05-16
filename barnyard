@@ -579,7 +579,7 @@ barnyard_configure() {
         abend 'barnyard not installed'
     fi
 
-    typeset -A o_barnyard
+    typeset -A o_barnyard o_registers
     barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)"
     o_barnyard[hostname]=$(hostname --long)
     [[ $o_quiet -eq 0 ]] && o_barnyard[quiet]=0
