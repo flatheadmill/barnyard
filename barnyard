@@ -674,6 +674,7 @@ _barnyard_command_apply() {
     fi
 }
 
+# TODO --develop becomes --barnyard and you can only run it with always.
 barnyard_command_always() {
     eval "$(barnyard_parse_arguments apply v,version: d,develop: q,quiet h,help -- "$@")"
     barnyard_configure 1 _barnyard_command_apply "$@"
