@@ -408,7 +408,7 @@ barnyard_display() {
 }
 
 barnyard_divider() {
-    [[ -n "$o_barnyard[quiet]" ]] && return
+    (( $o_barnyard[quiet] )) && return
     local label="$1"
     local bar=--------------------------------------------------------------------------------
     shift
