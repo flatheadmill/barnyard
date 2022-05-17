@@ -37,9 +37,13 @@ zsh_parse_arguments() {
                 break
                 ;;
             * )
-                variable=${1%=*}
-                [[ "$variable" = "$1" ]] && variable=
-                pattern=${1#*=}
+                if [[ "$1" =~ '^([^,]+)=(.*)$' ]]; then
+                    variable="$match[1]"
+                    pattern="$match[2]"
+                else
+                    variable=
+                    pattern="$1"
+                fi
                 regex='^([a-zA-Z0-9]?),([^@:#]*)([@:#]?)(=.*)?$'
                 [[ "$pattern" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
                 short=${match[1]} long=${match[2]} kind=${match[3]} default="${match[4]}"
@@ -582,9 +586,8 @@ barnyard_configure() {
     typeset -A o_barnyard o_registers=( always $always barnyard "$(readlink -f "$barnyard[1]")" )
     barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet 0
     [[ $o_quiet = 0 ]] && o_barnyard[quiet]=1
-    if [[ "$o_barnyard[barnyard]" = "/var/lib/barnyard/repository" ]]; then
+    if [[ "$o_registers[barnyard]" = "/var/lib/barnyard/repository" ]]; then
         o_barnyard[stage]=production
-    echo production && exit 1
         o_registers[always]=$always
 
         export GNUPGHOME=/etc/barnyard/gnupg
@@ -652,15 +655,21 @@ _barnyard_command_apply() {
             done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %G?')
         fi
 
+        if (( ${#o_modules[@]} )); then
+            checkout=( "$current[1]" )
+        fi
+
         # https://stackoverflow.com/a/21941473
         if [[ "${#checkout[@]}" -ne 0 ]]; then
             o_barnyard[sha1]="${checkout[1]}"
             o_barnyard[stage]=production
 
-            local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
-            declare -a modules=("${(@f)list}")
+            if ! (( ${#o_modules[@]} )); then
+                local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
+                o_modules=("${(@f)list}")
+            fi
 
-            barnyard_loop_modules "${modules[@]}"
+            barnyard_loop_modules "${o_modules[@]}"
 
             echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
         fi
@@ -671,7 +680,7 @@ _barnyard_command_apply() {
 
 # TODO --develop becomes --barnyard and you can only run it with always.
 barnyard_command_always() {
-    eval "$(barnyard_parse_arguments apply v,version: barnyard=b,barnyard: q,quiet h,help -- "$@")"
+    eval "$(barnyard_parse_arguments apply v,version: barnyard=b,barnyard:=/var/lib/barnyard/repository q,quiet h,help -- "$@")"
     barnyard_configure 1 _barnyard_command_apply "$@"
 }
 
