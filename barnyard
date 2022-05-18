@@ -588,7 +588,6 @@ barnyard_configure() {
     [[ $o_quiet = 0 ]] && o_barnyard[quiet]=1
     if [[ "$o_registers[barnyard]" = "/var/lib/barnyard/repository" ]]; then
         o_barnyard[stage]=production
-        o_registers[always]=$always
 
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
