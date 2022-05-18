@@ -456,7 +456,7 @@ barnyard_command_functions() {
 barnyard_clone() {
     local directory="$BARNYARD_TEMP/$1"
     mkdir -p "$directory"
-    if [[ "$o_barnyard[stage]" == production ]]; then
+    if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
         git -C "$o_registers[barnyard]" archive "${o_barnyard[sha1]}" | tar -C "$directory" -x
     else
         cp -R "$o_registers[barnyard]"/* "$directory"
@@ -587,8 +587,6 @@ barnyard_configure() {
     barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet 0
     [[ $o_quiet = 0 ]] && o_barnyard[quiet]=1
     if [[ "$o_registers[barnyard]" = "/var/lib/barnyard/repository" ]]; then
-        o_barnyard[stage]=production
-
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
 
@@ -598,8 +596,6 @@ barnyard_configure() {
             o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
         fi
     else
-        o_barnyard[stage]=development
-
         [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
         [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
 
@@ -615,11 +611,9 @@ barnyard_configure() {
 _barnyard_command_apply() {
     declare -a o_modules=( "$@" )
 
-    o_registers[always]=$always
-
     barnyard_version_check
 
-    if [[ $o_barnyard[stage] == production ]]; then
+    if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
         git -C "${o_registers[barnyard]}" checkout -q "${o_barnyard[branch]}"
         git -C "${o_registers[barnyard]}" pull -q origin "$branch"
 
@@ -661,7 +655,6 @@ _barnyard_command_apply() {
         # https://stackoverflow.com/a/21941473
         if [[ "${#checkout[@]}" -ne 0 ]]; then
             o_barnyard[sha1]="${checkout[1]}"
-            o_barnyard[stage]=production
 
             if ! (( ${#o_modules[@]} )); then
                 local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
@@ -685,8 +678,11 @@ barnyard_command_always() {
 
 barnyard_command_apply() {
     eval "$(barnyard_parse_arguments apply v,version: d,develop: q,quiet h,help -- "$@")"
+    (( ${#@} )) && <<'    EOF'
+        error: barnyard apply takes no positional arguments.
+    EOF
     typeset -a barnyard=( /var/lib/barnyard/repository )
-    barnyard_configure 0 _barnyard_command_apply "$@"
+    barnyard_configure 0 _barnyard_command_apply
 }
 
 # Could argue that the repository should never change, but it comes from outside
