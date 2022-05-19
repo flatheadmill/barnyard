@@ -28,9 +28,7 @@ zsh_parse_arguments() {
                 break
                 ;;
             * )
-                regex='^([a-zA-Z0-9]?),([^@:#]*)([@:#]?)(=.*)?$'
-                [[ "$pattern" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
-                if [[ "$1" =~ '^([^,]+)=(.*)$' ]]; then
+                if [[ "$1" =~ ^([^,]+)=(.*)$ ]]; then
                     variable="$match[1]"
                     pattern="$match[2]"
                 else
