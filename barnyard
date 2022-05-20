@@ -497,6 +497,11 @@ barnyard_run() {
 
     typeset -a applied diffs
 
+    echo ----
+    echo "$o_module[_apply]"
+    cat "/var/lib/barnyard/applied/$module"
+    echo ----
+
     case "$o_module[_apply]" in
         always )
             log module="$module" 'module %s run set to always, applying' "$module"
@@ -536,7 +541,8 @@ barnyard_run() {
     local code=$?
     [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
 
-    if [[ "$o_barnyard[barnyard]" = /var/lib/barnyard/repository ]]; then
+    if [[ "$o_registers[barnyard]" = /var/lib/barnyard/repository ]]; then
+        mkdir -p /var/lib/barnyard/applied
         log module="$module" "marking module %s as applied" "$module"
         git -C "$o_registers[barnyard]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
     fi
