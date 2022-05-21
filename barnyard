@@ -497,11 +497,6 @@ barnyard_run() {
 
     typeset -a applied diffs
 
-    echo ----
-    echo "$o_module[_apply]"
-    cat "/var/lib/barnyard/applied/$module"
-    echo ----
-
     case "$o_module[_apply]" in
         always )
             log module="$module" 'module %s run set to always, applying' "$module"
