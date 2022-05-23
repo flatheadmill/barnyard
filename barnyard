@@ -826,11 +826,6 @@ barnyard_command_prepare() {
         %commit
         %echo done
     EOF
-    gpg --list-keys
-    echo --------
-    hostname --long
-    gpg --list-keys $(hostname --long)
-    echo --------
     if ! gpg --list-keys $(hostname --long); then
         gpg --verbose --batch --gen-key "$BARNYARD_TEMP/key_details"
     fi
