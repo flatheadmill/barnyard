@@ -940,10 +940,14 @@ source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNY
 typeset -A o_barnyard=( ${(@Q)${(@z)__BARNYARD_O_BARNYARD__}} ) o_module=( ${(@Q)${(@z)__BARNYARD_O_MODULE__}} )
 unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
 
+cd "$o_barnyard[barnyard]"
+
 source "$1"
 ___ barnyard_exec ___
 source <(awk '/^___ barnyard_temporary_directory ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
 source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
+
+cd "$o_barnyard[barnyard]"
 
 source "$1"
 ___
