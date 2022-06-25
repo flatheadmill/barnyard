@@ -288,6 +288,15 @@ barnyard_get_array() {
     [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
 }
 
+barnyard_get_array_redux() {
+    if [[ -n "${${(P)1}[$2]}" ]]; then
+        : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
+    else
+        local empty=()
+        : ${(PA)3::=${empty[@]}}
+    fi
+}
+
 barnyard_read_config_() {
     local file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
     shift 2
