@@ -385,6 +385,11 @@ barnctl_command_configure() {
     EOF
     declare -a modules
     if [[ $# -eq 0 ]]; then
+        if [[ $o_force -eq 0 ]]; then
+            abend <<'            EOF'
+                error: refusing to force configuration of all modules'
+            EOF
+        fi
         for module in machines/$hostname/*; do
             modules+=(${module##*/})
         done
