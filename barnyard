@@ -624,8 +624,9 @@ _barnyard_command_apply() {
     barnyard_version_check
 
     if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
+        git -C "${o_registers[barnyard]}" fetch
         git -C "${o_registers[barnyard]}" checkout -q "${o_barnyard[branch]}"
-        git -C "${o_registers[barnyard]}" pull -q origin "$branch"
+        git -C "${o_registers[barnyard]}" pull -q origin "${o_barnyard[branch]}"
 
         # We also include the date stamp so that we don't apply a commit that
         # got out of order due to a rebase or merge. Barnyards really ought to
