@@ -565,7 +565,7 @@ barnyard_divider() {
     echo "$bar"
 }
 barnyard_divider 'apt update'
-apt-get update && apt-get upgrade -y && apt-get -y autoremove
+apt-get update
 barnyard_divider 'install zsh, gnupg2, git'
 apt-get install -y zsh gnupg2 git
 barnyard_divider 'install barnyard'
