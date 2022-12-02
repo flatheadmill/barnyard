@@ -226,18 +226,6 @@ barnyard_next_command() {
     EOF
 }
 
-# TODO Can I make these reusable? How about if you run `exec` as program these
-# get imported, but if you run `exec` as module they get created by the
-# launcher? LOL. Either way they are always there. Oh, wait...
-#
-# So, maybe exec runs without creating the barnyard environment and putting you
-# in that as the working directory. That would be the only difference.
-#
-# TODO `cd` to the barnyard directory and make that the working directory of a
-# barnyard script.
-
-___ barnyard_temporary_directory ___
-
 barnyard_cleanup() {
     [[ -n "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
 }
@@ -455,11 +443,6 @@ barnyard_version_check() {
     if (( ${#o_version[@]} )); then
         [[ "$o_version[1]" == "$VERSION" ]] || abend "local=$o_version[1]" remote=$VERSION 'version mismatch, please run upgrade'
     fi
-}
-
-barnyard_command_functions() {
-    eval "$(barnyard_parse_arguments functions h,help -- "$@")"
-    barnyard_zsh_resource barnyard_common
 }
 
 barnyard_clone() {
@@ -737,23 +720,6 @@ barnyard_command_commit() {
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
 }
 
-# If you want to execute a `zsh` in the `libexec` directory with just the
-# environment variables set then invoke it with `/usr/bin/zsh <path>`.
-
-barnyard_command_exec() {
-    eval "$(barnyard_parse_arguments exec v,version: h,help -- "$@")"
-    barnyard_version_check
-    local program=${1:-}
-    shift
-    if [[ "$program" = /usr/local/libexec/barnyard/*/*.zsh || "$program" != /* ]]; then
-        zsh <(barnyard_zsh_resource barnyard_exec) "$program" "$@"
-        exit $?
-    fi
-
-    "$program" "$@"
-    exit $?
-}
-
 # Here we add a gpg key. We also need a function to remove a key. We could use
 # a Barnyard module to remove a key, but then the user has to have one, write
 # one and if a key was compromised they'd want to remove it without running
@@ -899,43 +865,6 @@ barnyard_command_ssh() {
     barnyard_next_command ssh_ "$@"
 }
 
-_barnyard_command_status() {
-    declare -A o_module
-
-    barnyard_version_check
-
-    if ! (( $# )); then
-        if [[ -z "${o_barnyard[sha1]}" ]]; then
-            log 'barnyard not yet applied'
-        else
-            log 'barnyard applied %s' "${o_barnyard[sha1]}"
-        fi
-        return 0
-    fi
-
-    [[ -z "$o_barnyard[sha1]" ]] && abend 'barnyard not yet applied'
-
-    barnyard_clone_directory
-
-    while (( $# )); do
-        o_module[module]="$1"
-        o_module[_module]="$1"
-        shift
-
-        barnyard_clone "runs/$o_module[module]"
-
-        o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$o_module[module]"
-        zsh "$BARNYARD_TEMP/run" "$SCRIPT_DIR/barnyard" "${o_barnyard[barnyard]}/modules/$o_module[_module]/status.zsh"
-        echo here && exit 1
-    done
-}
-
-barnyard_command_status() {
-    eval "$(barnyard_parse_arguments status v,version d,develop: h,help -- "$@")"
-    barnyard_version_check
-    barnyard_configure 1 _barnyard_command_status "$@"
-}
-
 barnyard_command_version() {
     eval "$(barnyard_parse_arguments version "h,help" -- "$@")"
     print -R "$VERSION"
@@ -954,13 +883,6 @@ source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNY
 
 typeset -A o_barnyard=( ${(@Q)${(@z)__BARNYARD_O_BARNYARD__}} ) o_module=( ${(@Q)${(@z)__BARNYARD_O_MODULE__}} )
 unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
-
-cd "$o_barnyard[barnyard]"
-
-source "$1"
-___ barnyard_exec ___
-source <(awk '/^___ barnyard_temporary_directory ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
-source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
 
 cd "$o_barnyard[barnyard]"
 
