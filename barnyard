@@ -459,96 +459,98 @@ barnyard_clone() {
     else
         cp -R "$o_registers[barnyard]"/* "$BARNYARD_TEMP/run"
     fi
+
+    o_barnyard[barnyard]="$BARNYARD_TEMP/run"
 }
 
 barnyard_run() {
-    local module program
-
-    module=${1:-}
-    program=${2:-}
-
-    shift 2
-
-    o_barnyard[configuration]="$o_barnyard[barnyard]/machines/$o_barnyard[hostname]/$module"
-    o_barnyard[resources]="$o_barnyard[barnyard]/resources/$o_barnyard[hostname]"
-    o_barnyard[age]="$(<"$o_barnyard[barnyard]/age/$o_barnyard[hostname]")" || \
-        abend module=$module hostname="$o_barnyard[hostname]" 'age key missing for $%s' "$o_barnyard[hostname]"
+    local module program code
 
     typeset -A o_module
-
-    [[ -e "$o_barnyard[configuration]" ]] || abend 'no configuration for module %s' "$module"
-    barnyard_read_config o_module "$o_barnyard[configuration]" _apply once _module "$module"
-    (( $o_registers[always] )) && o_module[_apply]=always
-
-    mkdir -p /var/lib/barnyard/applied
-
     typeset -a applied diffs
 
-    case "$o_module[_apply]" in
-        always )
-            log module="$module" 'module %s run set to always, applying' "$module"
-            ;;
-        once )
-            if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
-                log module="$module" "already applied module %s" "$module"
-                return 0
-            fi
-            ;;
-        diff | cron )
-            if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
-                read -r -A applied < "/var/lib/barnyard/applied/$module"
-                if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
+    while (( $# )); do
+        module=${1:-}
+        shift
+        program=${module#*/}
+        module=${module%/*}
+        [[ $program = $module ]] && program=apply.zsh
+
+        o_barnyard[configuration]="$o_barnyard[barnyard]/machines/$o_barnyard[hostname]/$module"
+        o_barnyard[resources]="$o_barnyard[barnyard]/resources/$o_barnyard[hostname]"
+        o_barnyard[age]="$(<"$o_barnyard[barnyard]/age/$o_barnyard[hostname]")" || \
+            abend module=$module hostname="$o_barnyard[hostname]" 'age key missing for $%s' "$o_barnyard[hostname]"
+
+        o_module=()
+
+        [[ -e "$o_barnyard[configuration]" ]] || abend 'no configuration for module %s' "$module"
+        barnyard_read_config o_module "$o_barnyard[configuration]" _apply once _module "$module"
+        (( $o_registers[always] )) && o_module[_apply]=always
+
+        mkdir -p /var/lib/barnyard/applied
+
+
+        applied=()
+        diffs=()
+
+        case "$o_module[_apply]" in
+            always )
+                log module="$module" 'module %s run set to always, applying' "$module"
+                ;;
+            once )
+                if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
                     log module="$module" "already applied module %s" "$module"
                     return 0
                 fi
-                barnyard_get_array o_module _diff diffs
-                diffs+=("machines/$o_barnyard[hostname]/$module")
-                if git -C "$o_registers[barnyard]" diff --quiet "$applied[1]" "$o_barnyard[sha1]" -- "${diffs[@]}"; then
-                    log module="$module" "module %s has not changed, skipping" "$module"
-                    return 0
+                ;;
+            diff | cron )
+                if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
+                    read -r -A applied < "/var/lib/barnyard/applied/$module"
+                    if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
+                        log module="$module" "already applied module %s" "$module"
+                        return 0
+                    fi
+                    barnyard_get_array o_module _diff diffs
+                    diffs+=("machines/$o_barnyard[hostname]/$module")
+                    if git -C "$o_registers[barnyard]" diff --quiet "$applied[1]" "$o_barnyard[sha1]" -- "${diffs[@]}"; then
+                        log module="$module" "module %s has not changed, skipping" "$module"
+                        return 0
+                    fi
+                    log module="$module" "module %s has changed, re-applying" "$module"
                 fi
-                log module="$module" "module %s has changed, re-applying" "$module"
-            fi
-            ;;
-        never )
-            log module="$module" "module % run set to never, skipping" "$module"
-            return 0
-            ;;
-    esac
+                ;;
+            never )
+                log module="$module" "module % run set to never, skipping" "$module"
+                return 0
+                ;;
+        esac
 
-    o_barnyard[module]="$module"
-    export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)o_barnyard}}"
-    export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
-    zsh "$BARNYARD_TEMP/apply" "${o_barnyard[barnyard]}/modules/$o_module[_module]/$program"
-    local code=$?
-    [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
+        o_barnyard[module]="$module"
+        export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)o_barnyard}}"
+        export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
+        zsh "$BARNYARD_TEMP/apply" "${o_barnyard[barnyard]}/modules/$o_module[_module]/$program"
+        code=$?
+        [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
 
-    if [[ "$o_registers[barnyard]" = /var/lib/barnyard/repository ]]; then
-        mkdir -p /var/lib/barnyard/applied
-        log module="$module" "marking module %s as applied" "$module"
-        git -C "$o_registers[barnyard]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
-    fi
+        if [[ "$o_registers[barnyard]" = /var/lib/barnyard/repository ]]; then
+            mkdir -p /var/lib/barnyard/applied
+            log module="$module" "marking module %s as applied" "$module"
+            git -C "$o_registers[barnyard]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
+        fi
+    done
 }
 
-barnyard_loop_modules() {
+barnyard_order_modules() {
     mkdir -p "/var/lib/barnyard/sha1"
-
-    o_barnyard[barnyard]="$BARNYARD_TEMP/run"
-
-    local barnyard="$BARNYARD_TEMP/run"
 
     typeset -A ordered o_module o_program
     typeset -a unordered
     local configuration operation module program
-    for operation in "$@"; do
-        module=${operation%/*}
-        program=${operation#*/}
-        [[ $program = $module ]] && program=apply.zsh
-        o_program[$module]=$program
+    for module in "$@"; do
         configuration="machines/$o_barnyard[hostname]/$module"
-        [[ -e "$barnyard/$configuration" ]] || abend 'no configuration for module %s' "$module"
+        [[ -e "$o_barnyard[barnyard]/$configuration" ]] || abend 'no configuration for module %s' "$module"
         declare -A o_module
-        barnyard_read_config o_module "$barnyard/$configuration" _apply once
+        barnyard_read_config o_module "$o_barnyard[barnyard]/$configuration" _apply once
         if [[ "$o_module[_order]" ]]; then
             ordered[$module]="$o_module[_order]"
         else
@@ -562,7 +564,7 @@ barnyard_loop_modules() {
 
     log info modules="${(j: :)in_order[@]}" 'running modules in order' "${(j: :)in_order[@]}"
 
-    for module in "${in_order[@]}"; do barnyard_run "$module" $o_program[$module]; done
+    barnyard_run "${in_order[@]}"
 }
 
 barnyard_configure() {
@@ -654,13 +656,13 @@ _barnyard_command_apply() {
 
 
             barnyard_clone run
-            barnyard_loop_modules "${o_modules[@]}"
+            barnyard_order_modules "${o_modules[@]}"
 
             echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
         fi
     else
         barnyard_clone run
-        barnyard_loop_modules "${o_modules[@]}"
+        (( $o_registers[always] )) && barnyard_run "${o_modules[@]}" || barnyard_order_modules "${o_modules[@]}"
     fi
 }
 
