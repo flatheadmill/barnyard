@@ -446,22 +446,19 @@ barnyard_version_check() {
 }
 
 barnyard_clone() {
-    local directory="$BARNYARD_TEMP/$1"
-    mkdir -p "$directory"
-    if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
-        git -C "$o_registers[barnyard]" archive "${o_barnyard[sha1]}" | tar -C "$directory" -x
-    else
-        cp -R "$o_registers[barnyard]"/* "$directory"
-    fi
-}
-
-barnyard_clone_directory() {
     barnyard_temporary_directory
 
     mkdir -p "$BARNYARD_TEMP/barnyard"
     mkdir -p "$BARNYARD_TEMP/modules"
 
     barnyard_zsh_resource barnyard_apply > "$BARNYARD_TEMP/apply"
+
+    mkdir -p "$BARNYARD_TEMP/run"
+    if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
+        git -C "$o_registers[barnyard]" archive "${o_barnyard[sha1]}" | tar -C "$BARNYARD_TEMP/run" -x
+    else
+        cp -R "$o_registers[barnyard]"/* "$BARNYARD_TEMP/run"
+    fi
 }
 
 barnyard_run() {
@@ -472,9 +469,6 @@ barnyard_run() {
 
     shift 2
 
-    barnyard_clone "runs/$module"
-
-    o_barnyard[barnyard]="$BARNYARD_TEMP/runs/$module"
     o_barnyard[configuration]="$o_barnyard[barnyard]/machines/$o_barnyard[hostname]/$module"
     o_barnyard[resources]="$o_barnyard[barnyard]/resources/$o_barnyard[hostname]"
     o_barnyard[age]="$(<"$o_barnyard[barnyard]/age/$o_barnyard[hostname]")" || \
@@ -539,11 +533,9 @@ barnyard_run() {
 barnyard_loop_modules() {
     mkdir -p "/var/lib/barnyard/sha1"
 
-    barnyard_clone_directory
+    o_barnyard[barnyard]="$BARNYARD_TEMP/run"
 
-    barnyard_clone configure
-
-    local barnyard="$BARNYARD_TEMP/configure"
+    local barnyard="$BARNYARD_TEMP/run"
 
     typeset -A ordered o_module o_program
     typeset -a unordered
@@ -622,7 +614,6 @@ _barnyard_command_apply() {
             read -r -A current <<< "$(git -C ${o_registers[barnyard]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
         fi
 
-        echo here
         if (( ${#o_modules[@]} )); then
             checkout=( "$current[1]" )
         else
@@ -661,11 +652,14 @@ _barnyard_command_apply() {
                 o_modules=("${(@f)list}")
             fi
 
+
+            barnyard_clone run
             barnyard_loop_modules "${o_modules[@]}"
 
             echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
         fi
     else
+        barnyard_clone run
         barnyard_loop_modules "${o_modules[@]}"
     fi
 }
