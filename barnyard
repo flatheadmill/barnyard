@@ -22,34 +22,28 @@ zsh_parse_arguments() {
 
     declare -A argument_properties
 
-    local regex short long kind variable default pattern prefix=o_
+    local regex short long kind variable default
 
     while :
     do
         case "$1" in
-            -p | --prefix )
-                prefix="$2"
-                shift 2
-                continue
-                ;;
-            -- )
+            --)
                 shift
                 break
                 ;;
-            * )
-                if [[ "$1" =~ '^([^,]+)=(.*)$' ]]; then
+            *)
+                if [[ "$1" =~ ^([^,]+)=(.*)$ ]]; then
                     variable="$match[1]"
                     pattern="$match[2]"
                 else
                     variable=
                     pattern="$1"
                 fi
-                regex='^([a-zA-Z0-9]?),([^@:#]*)([@:#]?)(=.*)?$'
+                regex='^([a-zA-Z0-9]?),([^@:#!]*)([@:#!]?)(=.*)?$'
                 [[ "$pattern" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
-                short=${match[1]} long=${match[2]} kind=${match[3]} default="${match[4]}"
-                if [[ -z "$variable" ]]; then
-                    [[ -z "$long" ]] && variable=$prefix$short || variable=$prefix${long//-/_}
-                fi
+                short=${match[1]} long=${match[2]} kind=${match[3]} variable= default="${match[4]}"
+                [[ -n "$long" ]] && long=${long:gs/-/_/}
+                [[ -z "$long" ]] && variable=o_$short || variable=o_$long
                 if [[ "$default" != '' ]]; then
                     case x"$kind" in
                         x )
@@ -111,9 +105,10 @@ zsh_parse_arguments() {
     done
 
     declare -a args=( "$@" )
-    local i=1 arged flag
+    local i=1 arged flag negated
     while [[ $i -le ${#args[@]} ]]
     do
+        negated=1
         case "${args[$i]}" in
             - )
                 break
@@ -122,9 +117,19 @@ zsh_parse_arguments() {
                 let i=i+1
                 break
                 ;;
+            --no-* )
+                regex='^--no-([a-zA-Z0-9]+)$'
+                if [[ "${args[$i]}" =~ $regex ]] && [[ -n "${argument_properties[--$match[1]]}" ]]; then
+                    eval "${argument_properties[--$match[1]]}"
+                    if [[ $kind == toggle ]]; then
+                        args[$i]="--${match[1]}"
+                        negated=0
+                    fi
+                fi
+                ;&
             --* )
                 arged=1
-                regex='^(--[-a-zA-Z0-9]*)(=.*)?$'
+                regex='^(--[a-zA-Z0-9]*)(=.*)?$'
                 [[ "${args[$i]}" =~ $regex ]] || { print -R "$error $context unknown ${1:q}"; return; }
                 long="${match[1]}"
                 if [[ "$match[2]" != '' ]]; then
@@ -136,11 +141,9 @@ zsh_parse_arguments() {
                 flag=$long
                 [[ -z "${argument_properties[$long]}" ]] && { print -R "$error $context unknown ${short:q}"; return; }
                 eval "${argument_properties[$long]}"
-                if [[ $kind == toggle && "$long" =~ no- ]]; then
-                    print -R "$variable=0"
-                fi
                 ;;
             -* )
+                arged=1
                 short="${args[$i]}"
                 short="${short:0:2}"
                 flag=$short
@@ -148,10 +151,10 @@ zsh_parse_arguments() {
                 eval "${argument_properties[$short]}"
                 case "$kind" in
                     array | value )
-                        if [[ ${#${args[$i]}} -eq 2 ]]; then
+                        if [[ ${#short} -eq 2 ]]; then
                             let i=i+1
                         else
-                            args[i]=${${args[$i]}:2}
+                            args[i]=${short:2}
                         fi
                         ;;
                     * )
@@ -182,7 +185,11 @@ zsh_parse_arguments() {
                 print -R "let $variable=$variable+1"
                 ;;
             toggle )
-                print -R "[[ \$$variable -eq 0 ]] && $variable=1 || variable=0"
+                if [[ $negated -eq 0 ]]; then
+                    print -R "$variable=1"
+                else
+                    print -R "$variable=0"
+                fi
                 ;;
             value )
                 print -R "${variable}[1]=${args[$i]:q}"
