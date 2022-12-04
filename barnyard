@@ -343,7 +343,7 @@ barnyard_read_config_() {
         barnyard_read_config[$1]=${2:-}
         shift 2
     done
-    declare -a array
+    typeset -a array
     while read -r line; do
         [[ "$line" =~ $regex ]] || abend bad_config "$config"
         local key=$match[1] element_type=$match[2] value=$match[3]
@@ -474,16 +474,11 @@ barnyard_quotedoc() {
 }
 
 barnyard_run_() {
-    local module program code
+    typeset -A o_barnyard=( "${(@Q)${(@z)1}}" ) o_module
+    typeset -a modules=( "${(@Q)${(@z)2}}" ) applied diffs
+    typeset module program code
 
-    typeset -A o_module
-    typeset -a applied diffs
-
-    echo "$@"
-
-    while (( $# )); do
-        module=${1:-}
-        shift
+    for module in "${modules[@]}"; do
         program=${module#*/}
         module=${module%/*}
         [[ $program = $module ]] && program=apply.zsh
@@ -582,14 +577,13 @@ barnyard_clone() {
 
 barnyard_order_modules() {
     mkdir -p "/var/lib/barnyard/sha1"
-
     typeset -A ordered o_module o_program
     typeset -a unordered
-    local configuration operation module program
+    typeset configuration operation module program
     for module in "$@"; do
         configuration="machines/$o_barnyard[hostname]/$module"
         [[ -e "$o_barnyard[archive]/$configuration" ]] || abend 'no configuration for module %s' "$module"
-        declare -A o_module
+        o_module=()
         barnyard_read_config o_module "$o_barnyard[archive]/$configuration" _apply once
         if [[ "$o_module[_order]" ]]; then
             ordered[$module]="$o_module[_order]"
@@ -598,17 +592,17 @@ barnyard_order_modules() {
         fi
     done
 
-    declare -a in_order
+    typeset -a in_order
     in_order=(${(f)"$(sort -k1n,2 <(for module order in "${(@kv)ordered}"; do echo "$order $module"; done) | cut -d' ' -f2)"})
     in_order+=("${unordered[@]}")
 
     log info modules="${(j: :)in_order[@]}" 'running modules in order' "${(j: :)in_order[@]}"
 
-    barnyard_run_ "${in_order[@]}"
+    barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)modules}}}"
 }
 
 barnyard_apply() {
-    typeset -a o_modules=( "$@" )
+    typeset -a modules=( "$@" )
 
     [[ -e /etc/barnyard/config ]] || abend 'barnyard not installed'
     typeset -A o_barnyard
@@ -644,7 +638,7 @@ barnyard_apply() {
             read -r -A current <<< "$(git -C ${o_registers[repository]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
         fi
 
-        if (( ${#o_modules[@]} )); then
+        if (( ${#modules[@]} )); then
             checkout=( "$current[1]" )
         else
             git -C "${o_registers[repository]}" fetch
@@ -677,24 +671,26 @@ barnyard_apply() {
         if (( ${#checkout[@]} )); then
             o_barnyard[sha1]="${checkout[1]}"
 
-            if ! (( ${#o_modules[@]} )); then
+            if ! (( ${#modules[@]} )); then
                 local list="$(ls "${o_registers[repository]}/machines/${o_barnyard[hostname]}")"
-                o_modules=("${(@f)list}")
+                modules=("${(@f)list}")
             fi
 
 
             barnyard_clone run
             if [[ $o_registers[always] = yes ]]; then
-                barnyard_run_ "${o_modules[@]}"
+                barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)in_order}}}"
             else
-                barnyard_order_modules "${o_modules[@]}"
+                barnyard_order_modules "${modules[@]}"
             fi
 
             echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
         fi
     else
         barnyard_clone run
-        barnyard_run_ "${o_modules[@]}"
+        o_barnyard[foo]=
+        barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)modules}}}"
+        exit 1
     fi
 }
 
@@ -911,8 +907,8 @@ typeset -A o_barnyard=( "${(@Q)${(@z)__BARNYARD_O_BARNYARD__}}" ) o_module=( "${
 unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
 
 barnyard_always() {
-    typeset -A o_registers=( always 1 )
-    barnyard_run_ "$@"
+    typeset -A o_registers=( always yes )
+    barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)@}}}"
 }
 
 cd "$o_barnyard[archive]"
