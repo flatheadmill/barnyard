@@ -474,25 +474,29 @@ barnyard_quotedoc() {
 }
 
 barnyard_run_() {
-    typeset -A o_barnyard=( "${(@Q)${(@z)1}}" ) o_module
-    typeset -a modules=( "${(@Q)${(@z)2}}" ) applied diffs
+    typeset -A o_module barnyard
+    typeset -a applied diffs
     typeset module program code
 
-    for module in "${modules[@]}"; do
+    barnyard=( "${(@kv)o_barnyard}" )
+
+    while (( $# )); do
+        module=${1:-}
+        shift
         program=${module#*/}
         module=${module%/*}
         [[ $program = $module ]] && program=apply.zsh
 
         # ERROR Now we are stomping the parent context when we run `barnyard_always`.
-        o_barnyard[configuration]="$o_barnyard[archive]/machines/$o_barnyard[hostname]/$module"
-        o_barnyard[resources]="$o_barnyard[archive]/resources/$o_barnyard[hostname]"
-        o_barnyard[age]="$(<"$o_barnyard[archive]/age/$o_barnyard[hostname]")" || \
-            abend module=$module hostname="$o_barnyard[hostname]" 'age key missing for $%s' "$o_barnyard[hostname]"
+        barnyard[configuration]="$barnyard[archive]/machines/$barnyard[hostname]/$module"
+        barnyard[resources]="$barnyard[archive]/resources/$barnyard[hostname]"
+        barnyard[age]="$(<"$barnyard[archive]/age/$barnyard[hostname]")" || \
+            abend module=$module hostname="$barnyard[hostname]" 'age key missing for $%s' "$barnyard[hostname]"
 
         o_module=()
 
-        [[ -e "$o_barnyard[configuration]" ]] || abend 'no configuration for module %s' "$module"
-        barnyard_read_config o_module "$o_barnyard[configuration]" _apply once _module "$module"
+        [[ -e "$barnyard[configuration]" ]] || abend 'no configuration for module %s' "$module"
+        barnyard_read_config o_module "$barnyard[configuration]" _apply once _module "$module"
 
         mkdir -p /var/lib/barnyard/applied
 
@@ -513,13 +517,13 @@ barnyard_run_() {
             *-diff )
                 if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
                     read -r -A applied < "/var/lib/barnyard/applied/$module"
-                    if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
+                    if [[ "$applied[1]" = "$barnyard[sha1]" ]]; then
                         log module="$module" "already applied module %s" "$module"
                         return 0
                     fi
                     barnyard_get_array o_module _diff diffs
-                    diffs+=("machines/$o_barnyard[hostname]/$module")
-                    if git -C "$o_registers[repository]" diff --quiet "$applied[1]" "$o_barnyard[sha1]" -- "${diffs[@]}"; then
+                    diffs+=("machines/$barnyard[hostname]/$module")
+                    if git -C "$o_registers[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
                         log module="$module" "module %s has not changed, skipping" "$module"
                         return 0
                     fi
@@ -532,10 +536,10 @@ barnyard_run_() {
                 ;;
         esac
 
-        o_barnyard[module]="$module"
-        export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)o_barnyard}}"
+        barnyard[module]="$module"
+        export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
         export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
-        zsh "$BARNYARD_TEMP/apply" "${o_barnyard[archive]}/modules/$o_module[_module]/$program"
+        zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/modules/$o_module[_module]/$program"
         code=$?
         (( $code )) && abend code=$code module="$module" 'module %s exited %d' "$module" $code
 
@@ -546,7 +550,7 @@ barnyard_run_() {
         ]]; then
             mkdir -p /var/lib/barnyard/applied
             log module="$module" "marking module %s as applied" "$module"
-            git -C "$o_registers[repository]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
+            git -C "$o_registers[repository]" log -n 1 --format='%H %at' "$barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
         fi
     done
 }
@@ -598,7 +602,7 @@ barnyard_order_modules() {
 
     log info modules="${(j: :)in_order[@]}" 'running modules in order' "${(j: :)in_order[@]}"
 
-    barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)modules}}}"
+    barnyard_run_ "${(@)modules}"
 }
 
 barnyard_apply() {
@@ -679,7 +683,7 @@ barnyard_apply() {
 
             barnyard_clone run
             if [[ $o_registers[always] = yes ]]; then
-                barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)in_order}}}"
+                barnyard_run_ "${(@)in_order}"
             else
                 barnyard_order_modules "${modules[@]}"
             fi
@@ -689,8 +693,7 @@ barnyard_apply() {
     else
         barnyard_clone run
         o_barnyard[foo]=
-        barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)modules}}}"
-        exit 1
+        barnyard_run_ "${(@)modules}"
     fi
 }
 
@@ -908,7 +911,7 @@ unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
 
 barnyard_always() {
     typeset -A o_registers=( always yes )
-    barnyard_run_ "${${(@qq)${(@kv)o_barnyard}}}" "${${(@qq)${(@)@}}}"
+    barnyard_run_ "$@"
 }
 
 cd "$o_barnyard[archive]"
