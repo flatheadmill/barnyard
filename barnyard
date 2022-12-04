@@ -506,11 +506,11 @@ barnyard_run_() {
 
         case "$o_registers[always]-$o_module[_apply]" in
             yes-* | *-always )
-                log module="$module" 'module %s run set to always, applying' "$module"
+                log module="$module" program="$program" 'module %s run set to always, applying' "$module"
                 ;;
             *-once )
                 if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
-                    log module="$module" "already applied module %s" "$module"
+                    log module="$module" program="$program" "already applied module %s" "$module"
                     return 0
                 fi
                 ;;
@@ -518,20 +518,20 @@ barnyard_run_() {
                 if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
                     read -r -A applied < "/var/lib/barnyard/applied/$module"
                     if [[ "$applied[1]" = "$barnyard[sha1]" ]]; then
-                        log module="$module" "already applied module %s" "$module"
+                        log module="$module" program="$program" "already applied module %s" "$module"
                         return 0
                     fi
                     barnyard_get_array o_module _diff diffs
                     diffs+=("machines/$barnyard[hostname]/$module")
                     if git -C "$o_registers[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
-                        log module="$module" "module %s has not changed, skipping" "$module"
+                        log module="$module" program="$program" "module %s has not changed, skipping" "$module"
                         return 0
                     fi
-                    log module="$module" "module %s has changed, re-applying" "$module"
+                    log module="$module" program="$program" "module %s has changed, re-applying" "$module"
                 fi
                 ;;
             *-never )
-                log module="$module" "module % run set to never, skipping" "$module"
+                log module="$module" program="$program" "module % run set to never, skipping" "$module"
                 return 0
                 ;;
         esac
