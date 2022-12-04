@@ -242,24 +242,25 @@ barnyard_argument_error() {
 
 barnyard_parse_arguments() {
     zsh_parse_arguments barnyard_argument_error "$@"
-    echo "(( \$o_help )) && usage_$1"
+    printf "(( \$o_help )) && usage_$1\n"
 }
 
 IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
-    sed -n 's/^barnyard_command_\(.*\)() {$/\1/p' "$BARNYARD_PATH/barnyard" \
+    sed -n 's/^command_barnyard_\(.*\)() {$/\1/p' "$BARNYARD_PATH/barnyard" \
 )
 
 barnyard_next_command() {
     local prefix=${1:-} func
     shift
     if (( ! $# )); then
-        abend 'expects a command argument'
+        abend '`%s` expects a command argument' "${prefix//_/ }"
     fi
-    local cmd=${1:-} func
+    local cmd=${1:-}
     shift
     for func in "${BARNCTL_COMMANDS[@]}"; do
-        if [[ "$func" == "$prefix$cmd" ]]; then
-            "barnyard_command_$func" "$@"
+        func="command_${prefix}_${func}"
+        if [[ "$func" = "command_${prefix}_${cmd}" ]]; then
+            "$func" "$@"
             return
         fi
     done
@@ -300,7 +301,7 @@ fi
 # An environment variable so someone can set this in their shell.
 export BARNYARD_LOG_LEVEL
 
-barnyard_zsh_resource() {
+barnyard_string_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard"
 }
 
@@ -359,22 +360,6 @@ barnyard_read_config() {
     declare -A barnyard_read_config
     barnyard_read_config_ "$@"
     : ${(PA)${1:-reply}::=${(@kv)barnyard_read_config}}
-}
-
-barnyard_parse_arguments_() {
-    shift
-    local regex='^([^=]+)=(.*)$'
-    while [[ $# -ne 0 ]]; do
-        [[ "$1" =~ $regex ]] || abend bad_argument "$1"
-        shift
-        barnyard_parse_arguments+=("$match[1]" "$match[2]")
-    done
-}
-
-__barnyard_parse_arguments() {
-    declare -a barnyard_parse_arguments
-    barnyard_parse_arguments_ "$@"
-    : ${(PA)${1:-reply}::=${(@kv)barnyard_parse_arguments}}
 }
 
 abend() {
@@ -557,9 +542,9 @@ __barnyard_run() {
 }
 ___
 barnyard_version_check() {
-    if (( ${#o_version[@]} )); then
-        [[ "$o_version[1]" == "$VERSION" ]] || abend "local=$o_version[1]" remote=$VERSION 'version mismatch, please run upgrade'
-    fi
+    [[ -v o_version ]] && {
+        [[ "o_version" == "$VERSION" ]] || abend "local=$o_version" remote=$VERSION 'version mismatch, please run upgrade'
+    }
 }
 
 barnyard_clone() {
@@ -568,7 +553,7 @@ barnyard_clone() {
     mkdir -p "$BARNYARD_TEMP/barnyard"
     mkdir -p "$BARNYARD_TEMP/modules"
 
-    barnyard_zsh_resource barnyard_apply > "$BARNYARD_TEMP/apply"
+    barnyard_string_resource barnyard_apply > "$BARNYARD_TEMP/apply"
 
     mkdir -p "$BARNYARD_TEMP/run"
     if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
@@ -616,8 +601,7 @@ barnyard_configure() {
     fi
 
     typeset -A o_barnyard o_registers=( always $always barnyard "$(readlink -f "$barnyard[1]")" )
-    barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet 0
-    [[ $o_quiet = 0 ]] && o_barnyard[quiet]=1
+    barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet $o_quiet
     if [[ "$o_registers[barnyard]" = "/var/lib/barnyard/repository" ]]; then
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
@@ -640,7 +624,7 @@ barnyard_configure() {
     $next "$@"
 }
 
-_barnyard_command_apply() {
+_command_barnyard_apply() {
     typeset -a o_modules=( "$@" )
 
     barnyard_version_check
@@ -663,15 +647,7 @@ _barnyard_command_apply() {
             git -C "${o_registers[barnyard]}" checkout -q "${o_barnyard[branch]}"
             git -C "${o_registers[barnyard]}" pull -q origin "${o_barnyard[branch]}"
 
-            if [[ "${#current[@]}" -eq 0 ]]; then
-                while read -r line; do
-                    read -r -A fields <<< "$line"
-                    if [[ "${fields[3]}" == G ]]; then
-                        checkout=("${fields[@]}")
-                        break
-                    fi
-                done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %G?')
-            else
+            if (( ${#current[@]} )); then
                 while read -r line; do
                     IFS=' ' read -A fields <<< "$line"
                     if [[ "${fields[3]}" == G && ${fields[2]} -gt ${current[2]} ]]; then
@@ -682,11 +658,19 @@ _barnyard_command_apply() {
                         break
                     fi
                 done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %G?')
+            else
+                while read -r line; do
+                    read -r -A fields <<< "$line"
+                    if [[ "${fields[3]}" == G ]]; then
+                        checkout=("${fields[@]}")
+                        break
+                    fi
+                done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %G?')
             fi
         fi
 
         # https://stackoverflow.com/a/21941473
-        if [[ "${#checkout[@]}" -ne 0 ]]; then
+        if (( ${#checkout[@]} )); then
             o_barnyard[sha1]="${checkout[1]}"
 
             if ! (( ${#o_modules[@]} )); then
@@ -706,25 +690,26 @@ _barnyard_command_apply() {
     fi
 }
 
-barnyard_command_always() {
-    eval "$(barnyard_parse_arguments apply v,version: barnyard=b,barnyard:=/var/lib/barnyard/repository q,quiet h,help -- "$@")"
-    barnyard_configure 1 _barnyard_command_apply "$@"
+command_barnyard_always() {
+    local o_barnyard=/var/lib/barnyard/repository
+    eval "$(barnyard_parse_arguments apply v,version: barnyard=b,barnyard: q,quiet h,help -- "$@")"
+    barnyard_configure 1 _command_barnyard_apply "$@"
 }
 
-barnyard_command_apply() {
-    eval "$(barnyard_parse_arguments apply v,version: d,develop: q,quiet h,help -- "$@")"
+command_barnyard_apply() {
+    eval "$(barnyard_parse_arguments apply v,version: q,quiet h,help -- "$@")"
     (( ${#@} )) && <<'    EOF'
         error: barnyard apply takes no positional arguments.
     EOF
     typeset -a barnyard=( /var/lib/barnyard/repository )
-    barnyard_configure 0 _barnyard_command_apply
+    barnyard_configure 0 _command_barnyard_apply
 }
 
 # Could argue that the repository should never change, but it comes from outside
 # and so yes, it could change. You might want to rename your repository, why
 # not? It's not immutable like the age or gpg key.
 
-barnyard_command_clone() {
+command_barnyard_clone() {
     eval "$(barnyard_parse_arguments clone v,version: h,help -- "$@")"
 
     barnyard_version_check
@@ -750,7 +735,7 @@ barnyard_command_clone() {
     print -R "branch=$branch" > /etc/barnyard/config
 }
 
-barnyard_command_commit() {
+command_barnyard_commit() {
     eval "$(barnyard_parse_arguments apply v,version: h,help -- "$@")"
     barnyard_version_check
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
@@ -761,7 +746,7 @@ barnyard_command_commit() {
 # one and if a key was compromised they'd want to remove it without running
 # Barnyard, because Barnyard could not be trusted until the key was revoked.
 
-barnyard_command_gpg_import() {
+command_barnyard_gpg_import() {
     eval "$(barnyard_parse_arguments gpg_import v,version: h,help -- "$@")"
 
     barnyard_version_check
@@ -789,7 +774,7 @@ barnyard_command_gpg_import() {
     gpg --list-keys
 }
 
-barnyard_command_gpg() {
+command_barnyard_gpg() {
     eval "$(barnyard_parse_arguments gpg "h,help" -- "$@")"
     barnyard_next_command gpg_ "$@"
 }
@@ -804,8 +789,8 @@ barnyard_install_age() {
     age --version
 }
 
-barnyard_command_prepare() {
-    eval "$(barnyard_parse_arguments prepare "h,help" -- "$@")"
+command_barnyard_prepare() {
+    eval "$(barnyard_parse_arguments prepare h,help -- "$@")"
     barnyard_divider 'check gpg'
     gpg --version
     barnyard_divider 'check git'
@@ -853,7 +838,7 @@ barnyard_command_prepare() {
 # `barnctl` over SSH or at the very least from a file on the filesystem of the
 # host machine.
 
-barnyard_command_ssh_known-hosts() {
+command_barnyard_ssh_known-hosts() {
     eval "$(barnyard_parse_arguments ssh_known-hosts v,version: h,help -- "$@")"
 
     barnyard_version_check
@@ -874,7 +859,7 @@ barnyard_command_ssh_known-hosts() {
     cat /etc/barnyard/known_hosts
 }
 
-barnyard_command_ssh_private-key() {
+command_barnyard_ssh_private-key() {
     eval "$(barnyard_parse_arguments ssh_private-key v,version: h,help -- "$@")"
 
     barnyard_version_check
@@ -896,29 +881,19 @@ barnyard_command_ssh_private-key() {
     ssh-keygen -lf /etc/barnyard/id_barnyard
 }
 
-barnyard_command_ssh() {
-    eval "$(barnyard_parse_arguments ssh "h,help" -- "$@")"
+command_barnyard_ssh() {
+    eval "$(barnyard_parse_arguments ssh h,help -- "$@")"
     barnyard_next_command ssh_ "$@"
 }
 
-barnyard_command_version() {
-    eval "$(barnyard_parse_arguments version "h,help" -- "$@")"
+command_barnyard_version() {
+    eval "$(barnyard_parse_arguments version h,help -- "$@")"
     print -R "$VERSION"
 }
 
-barnyard_command_parse() {
-    barnyard_parse_arguments root h,help -- "$@"
-    print called
-}
-
-nested() {
-    eval "$(barnyard_parse_arguments root o_values=v,value%: h,help -- "$@")"
-    barnyard_next_command "" "$@"
-}
-
 main() {
-    typeset -A foo_bar_baz=()
-    nested "$@"
+    eval "$(barnyard_parse_arguments barnyard h,help -- "$@")"
+    barnyard_next_command "barnyard" "$@"
 }
 
 main "$@"
