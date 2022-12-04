@@ -245,8 +245,9 @@ barnyard_parse_arguments() {
     printf "(( \$o_help )) && usage_$1\n"
 }
 
+# Note that the pattern excludes any function names ending in `_`.
 IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
-    sed -n 's/^command_barnyard_\(.*\)() {$/\1/p' "$BARNYARD_PATH/barnyard" \
+    sed -n 's/^command_barnyard_\(.*[^_]\)() {$/\1/p' "$BARNYARD_PATH/barnyard" \
 )
 
 barnyard_next_command() {
@@ -464,7 +465,7 @@ barnyard_quotedoc() {
     })"
 }
 
-__barnyard_run() {
+barnyard_run_() {
     local module program code
 
     typeset -A o_module
@@ -477,9 +478,9 @@ __barnyard_run() {
         module=${module%/*}
         [[ $program = $module ]] && program=apply.zsh
 
-        o_barnyard[configuration]="$o_barnyard[barnyard]/machines/$o_barnyard[hostname]/$module"
-        o_barnyard[resources]="$o_barnyard[barnyard]/resources/$o_barnyard[hostname]"
-        o_barnyard[age]="$(<"$o_barnyard[barnyard]/age/$o_barnyard[hostname]")" || \
+        o_barnyard[configuration]="$o_barnyard[archive]/machines/$o_barnyard[hostname]/$module"
+        o_barnyard[resources]="$o_barnyard[archive]/resources/$o_barnyard[hostname]"
+        o_barnyard[age]="$(<"$o_barnyard[archive]/age/$o_barnyard[hostname]")" || \
             abend module=$module hostname="$o_barnyard[hostname]" 'age key missing for $%s' "$o_barnyard[hostname]"
 
         o_module=()
@@ -513,7 +514,7 @@ __barnyard_run() {
                     fi
                     barnyard_get_array o_module _diff diffs
                     diffs+=("machines/$o_barnyard[hostname]/$module")
-                    if git -C "$o_registers[barnyard]" diff --quiet "$applied[1]" "$o_barnyard[sha1]" -- "${diffs[@]}"; then
+                    if git -C "$o_registers[repository]" diff --quiet "$applied[1]" "$o_barnyard[sha1]" -- "${diffs[@]}"; then
                         log module="$module" "module %s has not changed, skipping" "$module"
                         return 0
                     fi
@@ -529,14 +530,14 @@ __barnyard_run() {
         o_barnyard[module]="$module"
         export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)o_barnyard}}"
         export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
-        zsh "$BARNYARD_TEMP/apply" "${o_barnyard[barnyard]}/modules/$o_module[_module]/$program"
+        zsh "$BARNYARD_TEMP/apply" "${o_barnyard[archive]}/modules/$o_module[_module]/$program"
         code=$?
         [[ $code -ne 0 ]] && abend 'module %s exited %d' "${module}" $code
 
-        if [[ "$o_registers[barnyard]" = /var/lib/barnyard/repository ]]; then
+        if [[ "$o_registers[repository]" = /var/lib/barnyard/repository ]]; then
             mkdir -p /var/lib/barnyard/applied
             log module="$module" "marking module %s as applied" "$module"
-            git -C "$o_registers[barnyard]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
+            git -C "$o_registers[repository]" log -n 1 --format='%H %at' "$o_barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
         fi
     done
 }
@@ -556,13 +557,13 @@ barnyard_clone() {
     barnyard_string_resource barnyard_apply > "$BARNYARD_TEMP/apply"
 
     mkdir -p "$BARNYARD_TEMP/run"
-    if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
-        git -C "$o_registers[barnyard]" archive "${o_barnyard[sha1]}" | tar -C "$BARNYARD_TEMP/run" -x
+    if [[ "$o_registers[repository]" == /var/lib/barnyard/repository ]]; then
+        git -C "$o_registers[repository]" archive "${o_barnyard[sha1]}" | tar -C "$BARNYARD_TEMP/run" -x
     else
-        cp -R "$o_registers[barnyard]"/* "$BARNYARD_TEMP/run"
+        cp -R "$o_registers[repository]"/* "$BARNYARD_TEMP/run"
     fi
 
-    o_barnyard[barnyard]="$BARNYARD_TEMP/run"
+    o_barnyard[archive]="$BARNYARD_TEMP/run"
 }
 
 barnyard_order_modules() {
@@ -573,9 +574,9 @@ barnyard_order_modules() {
     local configuration operation module program
     for module in "$@"; do
         configuration="machines/$o_barnyard[hostname]/$module"
-        [[ -e "$o_barnyard[barnyard]/$configuration" ]] || abend 'no configuration for module %s' "$module"
+        [[ -e "$o_barnyard[archive]/$configuration" ]] || abend 'no configuration for module %s' "$module"
         declare -A o_module
-        barnyard_read_config o_module "$o_barnyard[barnyard]/$configuration" _apply once
+        barnyard_read_config o_module "$o_barnyard[archive]/$configuration" _apply once
         if [[ "$o_module[_order]" ]]; then
             ordered[$module]="$o_module[_order]"
         else
@@ -589,47 +590,47 @@ barnyard_order_modules() {
 
     log info modules="${(j: :)in_order[@]}" 'running modules in order' "${(j: :)in_order[@]}"
 
-    __barnyard_run "${in_order[@]}"
+    barnyard_run_ "${in_order[@]}"
 }
 
 barnyard_configure() {
     local always=${1:-} next=${2:-}
     shift 2
 
-    if [[ ! -e /etc/barnyard/config ]]; then
-        abend 'barnyard not installed'
-    fi
+    typeset -A o_registers=( always $always repository "$(readlink -f "$o_repository")" )
 
-    typeset -A o_barnyard o_registers=( always $always barnyard "$(readlink -f "$barnyard[1]")" )
+    [[ ! -e /etc/barnyard/config ]] || abend 'barnyard not installed'
+    typeset -A o_barnyard
     barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet $o_quiet
-    if [[ "$o_registers[barnyard]" = "/var/lib/barnyard/repository" ]]; then
+
+    if [[ "$o_registers[repository]" = "/var/lib/barnyard/repository" ]]; then
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
 
-        o_registers[barnyard]=/var/lib/barnyard/repository
+        o_registers[repository]=/var/lib/barnyard/repository
 
         if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
             o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
         fi
     else
         [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
-        [[ -e "$o_registers[barnyard]" ]] || abend 'no barnyard at path %s' "${o_barnyard[barnyard]:q}"
+        [[ -e "$o_registers[repository]" ]] || abend 'no barnyard at path %s' "${o_registers[repository]:q}"
 
         local barnyard_user
-        barnyard_user=$(stat -c '%U' "${o_registers[barnyard]}/.git/index") || abend 'not a git repo %s' "$o_registers[barnyard]"
+        barnyard_user=$(stat -c '%U' "${o_registers[repository]}/.git/index") || abend 'not a git repo %s' "$o_registers[repository]"
 
-        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[barnyard]:q}"
+        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_registers[repository]:q}"
     fi
 
     $next "$@"
 }
 
-_command_barnyard_apply() {
+command_barnyard_apply_() {
     typeset -a o_modules=( "$@" )
 
     barnyard_version_check
 
-    if [[ "$o_registers[barnyard]" == /var/lib/barnyard/repository ]]; then
+    if [[ "$o_registers[repository]" == /var/lib/barnyard/repository ]]; then
         # We also include the date stamp so that we don't apply a commit that
         # got out of order due to a rebase or merge. Barnyards really ought to
         # be linear and automated, though.
@@ -637,15 +638,15 @@ _command_barnyard_apply() {
         local sha1
         typeset -a current
         if [[ -n "$o_barnyard[sha1]" ]]; then
-            read -r -A current <<< "$(git -C ${o_registers[barnyard]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
+            read -r -A current <<< "$(git -C ${o_registers[repository]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
         fi
 
         if (( ${#o_modules[@]} )); then
             checkout=( "$current[1]" )
         else
-            git -C "${o_registers[barnyard]}" fetch
-            git -C "${o_registers[barnyard]}" checkout -q "${o_barnyard[branch]}"
-            git -C "${o_registers[barnyard]}" pull -q origin "${o_barnyard[branch]}"
+            git -C "${o_registers[repository]}" fetch
+            git -C "${o_registers[repository]}" checkout -q "${o_barnyard[branch]}"
+            git -C "${o_registers[repository]}" pull -q origin "${o_barnyard[branch]}"
 
             if (( ${#current[@]} )); then
                 while read -r line; do
@@ -657,7 +658,7 @@ _command_barnyard_apply() {
                     if [[ "${fields[1]}" == "${current[1]}" ]]; then
                         break
                     fi
-                done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %G?')
+                done < <(git -C "${o_registers[repository]}" log --format='%H %at %G?')
             else
                 while read -r line; do
                     read -r -A fields <<< "$line"
@@ -665,7 +666,7 @@ _command_barnyard_apply() {
                         checkout=("${fields[@]}")
                         break
                     fi
-                done < <(git -C "${o_registers[barnyard]}" log --format='%H %at %G?')
+                done < <(git -C "${o_registers[repository]}" log --format='%H %at %G?')
             fi
         fi
 
@@ -674,26 +675,26 @@ _command_barnyard_apply() {
             o_barnyard[sha1]="${checkout[1]}"
 
             if ! (( ${#o_modules[@]} )); then
-                local list="$(ls "${o_registers[barnyard]}/machines/${o_barnyard[hostname]}")"
+                local list="$(ls "${o_registers[repository]}/machines/${o_barnyard[hostname]}")"
                 o_modules=("${(@f)list}")
             fi
 
 
             barnyard_clone run
-            (( $o_registers[always] )) && __barnyard_run "${o_modules[@]}" || barnyard_order_modules "${o_modules[@]}"
+            (( $o_registers[always] )) && barnyard_run_ "${o_modules[@]}" || barnyard_order_modules "${o_modules[@]}"
 
             echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
         fi
     else
         barnyard_clone run
-        (( $o_registers[always] )) && __barnyard_run "${o_modules[@]}" || barnyard_order_modules "${o_modules[@]}"
+        (( $o_registers[always] )) && barnyard_run_ "${o_modules[@]}" || barnyard_order_modules "${o_modules[@]}"
     fi
 }
 
 command_barnyard_always() {
     local o_barnyard=/var/lib/barnyard/repository
-    eval "$(barnyard_parse_arguments apply v,version: barnyard=b,barnyard: q,quiet h,help -- "$@")"
-    barnyard_configure 1 _command_barnyard_apply "$@"
+    eval "$(barnyard_parse_arguments apply v,version: o_repository=b,barnyard: q,quiet h,help -- "$@")"
+    barnyard_configure 1 command_barnyard_apply_ "$@"
 }
 
 command_barnyard_apply() {
@@ -702,7 +703,7 @@ command_barnyard_apply() {
         error: barnyard apply takes no positional arguments.
     EOF
     typeset -a barnyard=( /var/lib/barnyard/repository )
-    barnyard_configure 0 _command_barnyard_apply
+    barnyard_configure 0 command_barnyard_apply_
 }
 
 # Could argue that the repository should never change, but it comes from outside
@@ -907,10 +908,10 @@ unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
 
 barnyard_always() {
     typeset -A o_registers=( always 1 )
-    __barnyard_run "$@"
+    barnyard_run_ "$@"
 }
 
-cd "$o_barnyard[barnyard]"
+cd "$o_barnyard[archive]"
 
 source "$1"
 ___
