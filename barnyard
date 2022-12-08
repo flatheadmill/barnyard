@@ -601,7 +601,7 @@ barnyard_order_modules() {
 
     log info modules="${(j: :)in_order[@]}" 'running modules in order' "${(j: :)in_order[@]}"
 
-    barnyard_run_ "${(@)modules}"
+    barnyard_run_ "${(@)in_order}"
 }
 
 barnyard_apply() {
@@ -682,7 +682,7 @@ barnyard_apply() {
 
             barnyard_clone run
             if [[ $o_registers[always] = yes ]]; then
-                barnyard_run_ "${(@)in_order}"
+                barnyard_run_ "${(@)modules}"
             else
                 barnyard_order_modules "${modules[@]}"
             fi
