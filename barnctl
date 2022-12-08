@@ -365,7 +365,7 @@ barnctl_command_bootstrap() {
             cat "$o_known"
             print -R EOF
         fi
-        if [[ -v -o_ssh ]]; then
+        if [[ -v o_ssh ]]; then
             print -R 'cat <<EOF | barnyard ssh private-key --version='$VERSION' - || exit 1'
             cat "$o_ssh"
             print -R EOF
