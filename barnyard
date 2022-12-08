@@ -644,7 +644,7 @@ barnyard_apply() {
         if (( ${#modules[@]} )); then
             checkout=( "$current[1]" )
         else
-            git -C "${o_registers[repository]}" fetch
+            git -C "${o_registers[repository]}" fetch -q
             git -C "${o_registers[repository]}" checkout -q "${o_barnyard[branch]}"
             git -C "${o_registers[repository]}" pull -q origin "${o_barnyard[branch]}"
 
