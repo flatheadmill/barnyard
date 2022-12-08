@@ -717,6 +717,8 @@ command_barnyard_apply() {
 command_barnyard_clone() {
     eval "$(barnyard_parse_arguments clone v,version: h,help -- "$@")"
 
+   export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
+
     barnyard_version_check
 
     (( $# )) || abend 'a git repository url is required'
