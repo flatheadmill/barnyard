@@ -540,7 +540,7 @@ barnyard_run_() {
         export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
         zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/modules/$o_module[_module]/$program"
         code=$?
-        (( $code )) && abend code=$code module="$module" 'module %s exited %d' "$module" $code
+        (( $code )) && log err code=$code module="$module" 'module %s exited %d' "$module" $code && return $code
 
         if [[
             "$o_registers[repository]" = /var/lib/barnyard/repository && \
@@ -679,15 +679,14 @@ barnyard_apply() {
                 modules=("${(@f)list}")
             fi
 
-
+            # Note here and below that we are stuggling to propagate the exit code.
             barnyard_clone run
             if [[ $o_registers[always] = yes ]]; then
                 barnyard_run_ "${(@)modules}"
             else
-                barnyard_order_modules "${modules[@]}"
+                barnyard_order_modules "${modules[@]}" && \
+                    echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
             fi
-
-            echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
         fi
     else
         barnyard_clone run
