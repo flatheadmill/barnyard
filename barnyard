@@ -267,7 +267,6 @@ barnyard_next_command() {
     local cmd=${1:-}
     shift
     for func in "${BARNCTL_COMMANDS[@]}"; do
-        echo "${prefix}_${cmd}" "$func"
         if [[ "$func" = "${prefix}_${cmd}" ]]; then
             "command_$func" "$@"
             return
