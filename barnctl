@@ -679,7 +679,7 @@ machine() {
         fi
         key="${1/#*=/=}"
         case "${1/%=*/=}" in
-            once | diff | cron | never )
+            once | diff | always | never )
                 print -R "_apply=$1" >> "$filename"
                 ;;
             *@= )
