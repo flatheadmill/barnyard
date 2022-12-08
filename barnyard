@@ -510,7 +510,7 @@ barnyard_run_() {
             *-once )
                 if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
                     log module="$module" program="$program" "already applied module %s" "$module"
-                    return 0
+                    continue
                 fi
                 ;;
             *-diff )
@@ -518,20 +518,20 @@ barnyard_run_() {
                     read -r -A applied < "/var/lib/barnyard/applied/$module"
                     if [[ "$applied[1]" = "$barnyard[sha1]" ]]; then
                         log module="$module" program="$program" "already applied module %s" "$module"
-                        return 0
+                        continue
                     fi
                     barnyard_get_array o_module _diff diffs
                     diffs+=("machines/$barnyard[hostname]/$module")
                     if git -C "$o_registers[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
                         log module="$module" program="$program" "module %s has not changed, skipping" "$module"
-                        return 0
+                        continue
                     fi
                     log module="$module" program="$program" "module %s has changed, re-applying" "$module"
                 fi
                 ;;
             *-never )
                 log module="$module" program="$program" "module % run set to never, skipping" "$module"
-                return 0
+                continue
                 ;;
         esac
 
