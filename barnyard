@@ -557,7 +557,7 @@ barnyard_run_() {
 ___
 barnyard_version_check() {
     [[ -v o_version ]] && {
-        [[ "o_version" == "$VERSION" ]] || abend "local=$o_version" remote=$VERSION 'version mismatch, please run upgrade'
+        [[ "$o_version" = "$VERSION" ]] || abend "local=$o_version" remote=$VERSION 'version mismatch, please run upgrade'
     }
 }
 
