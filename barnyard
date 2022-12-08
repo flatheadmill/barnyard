@@ -255,7 +255,7 @@ barnyard_parse_arguments() {
 
 # Note that the pattern excludes any function names ending in `_`.
 IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
-    sed -n 's/^command_barnyard_\(.*[^_]\)() {$/\1/p' "$BARNYARD_PATH/barnyard" \
+    sed -n 's/^command_\(barnyard_.*[^_]\)() {$/\1/p' "$BARNYARD_PATH/barnyard" \
 )
 
 barnyard_next_command() {
@@ -267,13 +267,13 @@ barnyard_next_command() {
     local cmd=${1:-}
     shift
     for func in "${BARNCTL_COMMANDS[@]}"; do
-        func="command_${prefix}_${func}"
-        if [[ "$func" = "command_${prefix}_${cmd}" ]]; then
-            "$func" "$@"
+        echo "${prefix}_${cmd}" "$func"
+        if [[ "$func" = "${prefix}_${cmd}" ]]; then
+            "command_$func" "$@"
             return
         fi
     done
-    func="barnard_$cmd"
+    func="${prefix}_${cmd}"
     abend 'no such command `%s`' ${${func/#root/barnyard}//_/ }
 }
 
@@ -780,7 +780,7 @@ command_barnyard_gpg_import() {
 
 command_barnyard_gpg() {
     eval "$(barnyard_parse_arguments gpg "h,help" -- "$@")"
-    barnyard_next_command gpg_ "$@"
+    barnyard_next_command barnyard_gpg "$@"
 }
 
 barnyard_install_age() {
@@ -887,7 +887,7 @@ command_barnyard_ssh_private-key() {
 
 command_barnyard_ssh() {
     eval "$(barnyard_parse_arguments ssh h,help -- "$@")"
-    barnyard_next_command ssh_ "$@"
+    barnyard_next_command barnyard_ssh "$@"
 }
 
 command_barnyard_version() {
@@ -897,7 +897,7 @@ command_barnyard_version() {
 
 main() {
     eval "$(barnyard_parse_arguments barnyard h,help -- "$@")"
-    barnyard_next_command "barnyard" "$@"
+    barnyard_next_command barnyard "$@"
 }
 
 main "$@"
