@@ -434,57 +434,7 @@ barnctl_command_configure() {
 barnctl_command_generate() {
     eval "$(barnctl_parse_arguments generate "h,help" -- "$@")"
 
-    assert_barnyard_directory
-
-    local now=$(date +%s)
-
-    declare -a file option
-    declare -a tokens
-
-    local line i j
-    declare -a machine fields
-    for configuration in "$@"; do
-        [[ ${configuration#*.} != yaml ]] && continue
-        tokens=(${(@Q)${(@z)"$(yq -o=json '.' < $configuration | jq  -r '
-          [
-              .machines | to_entries[] | .key as $machine | .value | to_entries as $a | $a | keys[] |
-                  $machine, ., $a[.].key,
-                      ($a[.].value | to_entries as $b | ($b | length), ($b[] | .key, (
-                        .value as $v | ($v | if type == "array" then ($v | length), $v else (0, $v) end)
-                        )))
-          ] | flatten | @sh
-        ')"}})
-        let i=1
-        while [[ $i -le ${#tokens[@]} ]]; do
-            machine=${tokens[$i]}
-            order=${tokens[(( i + 1 ))]}
-            file=${tokens[(( i + 2 ))]}
-            count=${tokens[(( i + 3 ))]}
-            if [[ $order -eq 0 ]]; then
-                rm -rf machines/$machine
-                mkdir -p machines/$machine
-                touch machines/$machine/.generated
-            fi
-            let i+=4
-            print -R "_order=$order" > "machines/$machine/$file"
-            while [[ $count -ne 0 ]]; do
-                if (( $tokens[(( i + 1 ))] == 0 )); then
-                    print -R "$tokens[i]=$tokens[(( i + 2 ))]" >> "machines/$machine/$file"
-                    let i+=3
-                else
-                    j=0
-                    while (( j != $tokens[(( i + 1 ))] )); do
-                        print -R "$tokens[i]+=$tokens[(( i + j + 2 ))]" >> "machines/$machine/$file"
-                        let j++
-                    done
-                    let i=i+2+j
-                fi
-                let count=count-1
-            done
-        done
-    done
-
-    local generate
+    typeset generate
 
     generate="$({
         barnctl_shell_resource barnctl_common
@@ -497,22 +447,10 @@ barnctl_command_generate() {
         zsh -c "$generate" -- "$configuration" || exit 1
     done
 
-    while read user; do
-        rm -f "users/$user"
-        touch "users/$user"
-        while read line; do
-            read -r -A option <<< "$line"
-            local decoded=$(echo "${option[2]}" | base64 --decode)
-            if [[ "$decoded" == *$'\n'* ]]; then
-                echo "${option[1]}=${option[2]}" >> "users/$user"
-            else
-                echo "${option[1]}=${decoded}" >> "users/$user"
-            fi
-        done < <(gojq -r --yaml-input --arg user "${user}" '
-            .users[$user] | to_entries[] | [ .key, (.value | tostring | @base64) ] | join(" ")
-        ' < users.yaml)
-    done < <(gojq -r --yaml-input '.users | to_entries[] | .key' < users.yaml)
+    return
 
+    # TODO Should be a separate function, we don't know what resources need
+    # cleaning up really.
     stat_format=(-c '%Y')
     [[ "$OSTYPE" = darwin* ]] && stat_format=(-f '%Dm')
     for machine in $(find . -name '.generated'); do
@@ -672,7 +610,6 @@ ___ barnctl_generate ___
                 key="${1/%=*/=}"
                 case "$key" in
                     *+= )
-                        echo 'yes, hello'
                         key="${key%+=}"
                         value="${1#*=}"
                         arrays[$key]=0
