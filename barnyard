@@ -696,7 +696,7 @@ barnyard_apply() {
 }
 
 command_barnyard_always() {
-    local o_barnyard=/var/lib/barnyard/repository
+    local o_repository=/var/lib/barnyard/repository
     eval "$(barnyard_parse_arguments apply v,version: o_repository=b,barnyard: q,quiet h,help -- "$@")"
     typeset -A o_registers=( always yes repository "$(readlink -f "$o_repository")" )
     barnyard_apply "$@"
