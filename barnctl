@@ -412,8 +412,8 @@ barnctl_command_configure() {
         error: hostname configuration not found
     EOF
     declare -a modules
-    if [[ $# -eq 0 ]]; then
-        if [[ $o_force -eq 0 ]]; then
+    if (( ! $# )); then
+        if (( $o_force )); then
             abend <<'            EOF'
                 error: refusing to force configuration of all modules'
             EOF
