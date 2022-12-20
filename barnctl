@@ -411,7 +411,7 @@ barnctl_command_configure() {
     [[ -d "machines/$hostname" ]] || abend<<'    EOF'
         error: hostname configuration not found
     EOF
-    declare -a modules
+    typeset -a modules
     if (( ! $# )); then
         if (( $o_force )); then
             abend <<'            EOF'
@@ -424,9 +424,18 @@ barnctl_command_configure() {
     else
         modules=("$@")
     fi
+    typeset -A o_module
     for module in "${modules[@]}"; do
-        if [[ -e modules/$module/configure.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $module $o_force || exit 1
+        o_module=()
+        barnctl_read_config o_module machines/$hostname/$module
+        if [[ -z "$o_module[_module]" ]]; then
+            o_module[_module]=$module
+        fi
+        echo "${(@kv)o_module}"
+        echo modules/$o_module[_module]/configure.zsh
+        if [[ -e modules/$o_module[_module]/configure.zsh ]]; then
+            echo "RUNNING"
+            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $o_force || exit 1
         fi
     done
 }
@@ -434,7 +443,7 @@ barnctl_command_configure() {
 barnctl_command_generate() {
     eval "$(barnctl_parse_arguments generate "h,help" -- "$@")"
 
-    typeset generate
+    typeset generate now=$(date +%s)
 
     generate="$({
         barnctl_shell_resource barnctl_common
@@ -445,20 +454,6 @@ barnctl_command_generate() {
     for configuration in "$@"; do
         [[ ${configuration#*.} != zsh ]] && continue
         zsh -c "$generate" -- "$configuration" || exit 1
-    done
-
-    return
-
-    # TODO Should be a separate function, we don't know what resources need
-    # cleaning up really.
-    stat_format=(-c '%Y')
-    [[ "$OSTYPE" = darwin* ]] && stat_format=(-f '%Dm')
-    for machine in $(find . -name '.generated'); do
-        if [[ $(stat "${stat_format[@]}" "$machine") -lt $now ]]; then
-            rm -rf "$(dirname $machine)"
-            rm -rf "resources/$(basename $(dirname $machine))"
-            rm -f "age/$(basename $(dirname $machine))"
-        fi
     done
 }
 
@@ -578,12 +573,13 @@ shift
 
 main() {
     declare -A o_barnyard o_module
-    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${3:-} o_barnyard[force]=${4:-}
+    typeset module=${3:-}
+    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[force]=${4:-}
     shift 3
     o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
     barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    source "${o_barnyard[barnyard]}/modules/${o_barnyard[module]}/configure.zsh"
+    source "${o_barnyard[barnyard]}/modules/$module/configure.zsh"
 }
 
 main "$@"
