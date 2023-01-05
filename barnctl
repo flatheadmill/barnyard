@@ -431,10 +431,7 @@ barnctl_command_configure() {
         if [[ -z "$o_module[_module]" ]]; then
             o_module[_module]=$module
         fi
-        echo "${(@kv)o_module}"
-        echo modules/$o_module[_module]/configure.zsh
         if [[ -e modules/$o_module[_module]/configure.zsh ]]; then
-            echo "RUNNING"
             zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $o_force || exit 1
         fi
     done
@@ -574,13 +571,15 @@ shift
 main() {
     declare -A o_barnyard o_module
     typeset module=${3:-}
-    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[force]=${4:-}
+    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[force]=${5:-}
     shift 3
     o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
     barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
     source "${o_barnyard[barnyard]}/modules/$module/configure.zsh"
 }
+
+echo foo "$@" bar
 
 main "$@"
 ___ barnctl_generate ___
