@@ -324,8 +324,9 @@ barnctl_command_always() {
     EOF
 
     local server=${1:-}
+    shift
 
-    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard always --version $VERSION"
+    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard always --version $VERSION ${(j: :)${(@)@:q}}"
 }
 
 barnctl_command_apply() {
