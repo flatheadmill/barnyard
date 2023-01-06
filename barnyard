@@ -697,7 +697,7 @@ barnyard_apply() {
 
 command_barnyard_always() {
     local o_repository=/var/lib/barnyard/repository
-    eval "$(barnyard_parse_arguments apply v,version: o_repository=b,barnyard: q,quiet h,help -- "$@")"
+    eval "$(barnyard_parse_arguments always v,version: o_repository=b,barnyard: q,quiet h,help -- "$@")"
     typeset -A o_registers=( always yes repository "$(readlink -f "$o_repository")" )
     barnyard_apply "$@"
 }
@@ -707,6 +707,84 @@ command_barnyard_apply() {
     (( ${#@} )) && abend 'barnyard apply takes no positional arguments'
     typeset -A o_registers=( always no repository /var/lib/barnyard/repository )
     barnyard_apply "$@"
+}
+
+barnyard_systemd() {
+    # We're going to only be interested in log entries emitted after we start
+    # our unit, so we capture the journal cursor now.
+    [[ "$(journalctl -q -e -n 1 -o verbose --output-fields '')" =~ ^.*\\[(.*)\\]$ ]]
+    typeset cursor=$match[1]
+
+    # Tail the barnyard logs from this point if we successfully start the unit.
+    typeset since="$(date --iso-8601=seconds | sed -e 's/T/ /' -e 's/\+.*//')"
+
+    # Attempt to start the unit. The `--collect` argument will delete the
+    # transient unit regardless of exit status. We set an environment variable
+    # that we'll use to assert that the running unit is the unit we ran.
+    systemd-run --setenv BARNYARD_PID=$$ --collect --unit barnyard $BARNYARD_PATH/barnyard "$@" || exit 1
+
+    # Grap a snapshot of the properties of the currently running unit.
+    typeset line
+    typeset -A properties
+    typeset -a split
+    while read -r line; do
+        split=( "${(@s:=:)line}" )
+        properties[$split[1]]="$split[2]"
+    done < <(systemctl show --property MainPID --property InvocationID barnyard)
+
+    # Check that there is a barnyard unit running.
+    (( $properties[MainPID] )) || abend 'barnyard exited awfully quick'
+
+    # Assert that we are the ones who ran it.
+    if [[ $(xargs -0 -L1 -a "/proc/${properties[MainPID]}/environ" | awk -v pid=$$ -F= '$1 == "BARNYARD_PID" && $2 == pid { print "true" }') = true ]] || \
+        abend 'some else started this barnyard unit'
+
+    # Start tailing the unit.
+    journalctl --quiet --cursor "$cursor" --no-pager -fe --unit barnyard &
+    typeset jctl=$!
+    trap "kill $jctl" EXIT
+
+    # Here we block. We tail `journalctl` until we see an exit message, either
+    # success or failure. It will be a single line so we pipe to head to get the
+    # line. When head exits this pipeline exits. Likely the user will have seen
+    # the final messages on in their terminal as well.
+    journalctl --quiet --follow --unit barnyard \
+        INVOCATION_ID=$properties[InvocationID] \
+        MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
+        MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15 | \
+    head -n 1 > /dev/null
+
+    # We get the exit message again, this time to determine the exit code.
+    typeset -A outcome
+    while read -r line; do
+        [[ "$line" =~ ^([^=]+)=(.*)$ ]] || continue
+        outcome[$match[1]]=$match[2]
+    done < <(
+        journalctl --quiet --unit barnyard --output export --output-fields EXIT_CODE,MESSAGE,MESSAGE_ID \
+            INVOCATION_ID=$properties[InvocationID] \
+            MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
+            MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15
+    )
+
+    # If it was an error message, return the error exit code.
+    [[ $outcome[MESSAGE_ID] = 98e322203f7a4ed290d09fe03c09fe15 ]] && return $outcome[EXIT_CODE]
+}
+
+command_barnyard_systemd_always() {
+    eval "$(barnyard_parse_arguments systemd_always v,version: h,help -- "$@")"
+    barnyard_version_check
+    barnyard_systemd always "$@"
+}
+
+command_barnyard_systemd_apply() {
+    eval "$(barnyard_parse_arguments systemd_apply v,version: h,help -- "$@")"
+    barnyard_version_check
+    barnyard_systemd apply "$@"
+}
+
+command_barnyard_systemd() {
+    eval "$(barnyard_parse_arguments systemd v,version: h,help -- "$@")"
+    barnyard_next_command barnyard_systemd "$@"
 }
 
 # Could argue that the repository should never change, but it comes from outside
@@ -836,6 +914,20 @@ command_barnyard_prepare() {
         gpg --verbose --batch --gen-key "$BARNYARD_TEMP/key_details"
     fi
     gpg --list-keys
+    barnyard_quotedoc <<'    EOF' | tee "/etc/systemd/system/barnyard.service"
+        [Unit]
+        Description=Apply Barnyard.
+
+        [Service]
+        Type=oneshot
+        User=root
+
+        ExecStart=/usr/local/bin/barnyard apply
+
+        [Install]
+        WantedBy=multi-user.target
+    EOF
+    systemctl daemon-reload
 }
 
 # We could transfer this age encrypted, but we assume it is comming from

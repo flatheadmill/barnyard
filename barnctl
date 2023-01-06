@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.8.6
+VERSION=0.8.8
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -316,8 +316,39 @@ barnctl_shell_resource() {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
 
+barnctl_command_systemd_always() {
+    eval "$(barnctl_parse_arguments systemd_always "h,help" -- "$@")"
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    typeset server=${1:-}
+    shift
+
+    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd always --version $VERSION ${(j: :)${(@)@:q}}"
+}
+
+barnctl_command_systemd_apply() {
+    eval "$(barnctl_parse_arguments systemd_apply "h,help" -- "$@")"
+
+    (( $# )) || abend<<'    EOF'
+        erorr: ssh hostname is required
+    EOF
+
+    typeset server=${1:-}
+    shift
+
+    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd apply --version $VERSION"
+}
+
+barnctl_command_systemd() {
+    eval "$(barnctl_parse_arguments systemd "h,help" -- "$@")"
+    barnctl_next_command systemd_ "$@"
+}
+
 barnctl_command_always() {
-    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
+    eval "$(barnctl_parse_arguments always "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
@@ -330,7 +361,7 @@ barnctl_command_always() {
 }
 
 barnctl_command_apply() {
-    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
+    eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
@@ -404,7 +435,7 @@ barnctl_command_commit() {
 
 barnctl_command_configure() {
     eval "$(barnctl_parse_arguments apply "h,help" "f,force" -- "$@")"
-    local hostname=${1:-}
+    typeset hostname=${1:-}
     shift
     [[ -d age && -d machines && -d modules ]] || abend<<'    EOF'
         error: barnyard utilties must be run in the barnyard directory
