@@ -344,7 +344,7 @@ barnctl_command_systemd_apply() {
 
 barnctl_command_systemd() {
     eval "$(barnctl_parse_arguments systemd "h,help" -- "$@")"
-    barnctl_next_command systemd_t "$@"
+    barnctl_next_command systemd_ "$@"
 }
 
 barnctl_command_always() {
