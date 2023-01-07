@@ -423,15 +423,15 @@ log() {
         context="; ${(j:, :)syslog}"
     fi
 
-    if ! (( $o_barnyard[quiet] )); then
-        print -R "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
+    if [[ -v INVOCATION_ID ]]; then
+        typeset id
+        id=$(print -R "$SALT" "$format" | md5sum | cut -d' ' -f1)
+
+        journald+=("MESSAGE_ID=$id" "MESSAGE=$message$context" PRIORITY=$level SYSLOG_FACILITY=1 SYSLOG_IDENTIFIER=barnyard)
+        print "${(j:\n:)journald}" | logger --journald
+    else
+        printf "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
     fi
-
-    local id
-    id=$(print -R "$SALT" "$format" | md5sum | cut -d' ' -f1)
-
-    journald+=("MESSAGE_ID=$id" "MESSAGE=$message" PRIORITY=$level SYSLOG_FACILITY=1)
-    print "${(j:\n:)journald}" | logger --journald
 }
 
 barnyard_display() {
@@ -687,6 +687,8 @@ barnyard_apply() {
                 barnyard_order_modules "${modules[@]}" && \
                     echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
             fi
+        else
+            log 'no signature since last apply'
         fi
     else
         barnyard_clone run
