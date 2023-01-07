@@ -914,20 +914,6 @@ command_barnyard_prepare() {
         gpg --verbose --batch --gen-key "$BARNYARD_TEMP/key_details"
     fi
     gpg --list-keys
-    barnyard_quotedoc <<'    EOF' | tee "/etc/systemd/system/barnyard.service"
-        [Unit]
-        Description=Apply Barnyard.
-
-        [Service]
-        Type=oneshot
-        User=root
-
-        ExecStart=/usr/local/bin/barnyard apply
-
-        [Install]
-        WantedBy=multi-user.target
-    EOF
-    systemctl daemon-reload
 }
 
 # We could transfer this age encrypted, but we assume it is comming from
