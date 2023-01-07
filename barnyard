@@ -748,7 +748,7 @@ barnyard_systemd() {
     # success or failure. It will be a single line so we pipe to head to get the
     # line. When head exits this pipeline exits. Likely the user will have seen
     # the final messages on in their terminal as well.
-    journalctl --quiet --follow --unit barnyard \
+    journalctl --quiet --cursor "$cursor" --follow --unit barnyard \
         INVOCATION_ID=$properties[InvocationID] \
         MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
         MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15 | \
@@ -760,14 +760,14 @@ barnyard_systemd() {
         [[ "$line" =~ ^([^=]+)=(.*)$ ]] || continue
         outcome[$match[1]]=$match[2]
     done < <(
-        journalctl --quiet --unit barnyard --output export --output-fields EXIT_CODE,MESSAGE,MESSAGE_ID \
+        journalctl --quiet --cursor "$cursor" --unit barnyard --output export --output-fields EXIT_STATUS,MESSAGE,MESSAGE_ID \
             INVOCATION_ID=$properties[InvocationID] \
             MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
             MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15
     )
 
     # If it was an error message, return the error exit code.
-    [[ $outcome[MESSAGE_ID] = 98e322203f7a4ed290d09fe03c09fe15 ]] && return $outcome[EXIT_CODE]
+    [[ $outcome[MESSAGE_ID] = 98e322203f7a4ed290d09fe03c09fe15 ]] && return $outcome[EXIT_STATUS]
 }
 
 command_barnyard_systemd_always() {
