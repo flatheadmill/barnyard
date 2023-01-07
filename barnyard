@@ -424,6 +424,8 @@ log() {
     fi
 
     if [[ -v INVOCATION_ID ]]; then
+        printf '<%s> %s%s\n' $priority $message $context
+        return
         typeset id
         id=$(print -R "$SALT" "$format" | md5sum | cut -d' ' -f1)
 
