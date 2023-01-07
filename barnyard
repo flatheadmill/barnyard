@@ -744,7 +744,7 @@ barnyard_systemd() {
         abend 'some else started this barnyard unit'
 
     # Start tailing the unit.
-    journalctl --quiet --cursor "$cursor" --no-pager -fe --unit barnyard &
+    journalctl --quiet --cursor "$cursor" --no-hostname --no-pager -fe --unit barnyard &
     typeset jctl=$!
     trap "kill $jctl" EXIT
 
