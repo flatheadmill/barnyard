@@ -6,6 +6,9 @@
 # * `o_barnyard[barnyard]` is the repository and `o_barnyard[archive]` is the
 # directory where we extracted the barnyard version.
 
+# TODO Get stdout and `journalctl` date formats identical. (Probably locale
+# based.)
+
 #
 
 # Now I want the ability to export the barnyard functions.
@@ -432,7 +435,7 @@ log() {
         journald+=("MESSAGE_ID=$id" "MESSAGE=$message$context" PRIORITY=$level SYSLOG_FACILITY=1 SYSLOG_IDENTIFIER=barnyard)
         print "${(j:\n:)journald}" | logger --journald
     else
-        printf "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context"
+        printf "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context\n"
     fi
 }
 
