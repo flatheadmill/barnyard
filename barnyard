@@ -286,7 +286,6 @@ barnyard_cleanup() {
 barnyard_temporary_directory() {
     [[ -n "$BARNYARD_TEMP" ]] && return
     BARNYARD_TEMP="$(mktemp -d)"
-    export BARNYARD_TEMP
 }
 
 trap barnyard_cleanup EXIT
