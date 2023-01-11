@@ -742,6 +742,7 @@ barnyard_systemd() {
     (( $properties[MainPID] )) || abend 'barnyard exited awfully quick'
 
     # Assert that we are the ones who ran it.
+    # https://askubuntu.com/questions/978711/how-do-i-split-a-proc-environ-file-in-separate-lines
     if [[ $(xargs -0 -L1 -a "/proc/${properties[MainPID]}/environ" | awk -v pid=$$ -F= '$1 == "BARNYARD_PID" && $2 == pid { print "true" }') = true ]] || \
         abend 'some else started this barnyard unit'
 
