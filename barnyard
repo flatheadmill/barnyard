@@ -279,6 +279,7 @@ barnyard_next_command() {
     abend 'no such command `%s`' ${${func/#root/barnyard}//_/ }
 }
 
+unset BARNYARD_TEMP
 barnyard_cleanup() {
     [[ -n "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
 }
@@ -286,6 +287,7 @@ barnyard_cleanup() {
 barnyard_temporary_directory() {
     [[ -n "$BARNYARD_TEMP" ]] && return
     BARNYARD_TEMP="$(mktemp -d)"
+    export BARNYARD_TEMP
 }
 
 trap barnyard_cleanup EXIT
