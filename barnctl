@@ -245,6 +245,66 @@ barnctl_next_command() {
 }
 
 ___ barnctl_common ___
+@_args() {
+    local key value
+    typeset -A arguments arrays associative_arrays scalars seen
+    typeset -a array remainder
+    while (( $# != 0 )); do
+        key="${1/%=*/=}"
+        case "$1" in
+            %* )
+                key=${1#%}
+                associative_arrays[$key]=0
+                if (( ${+arguments[$key]} )); then
+                    array=("${(@Q)${(@z)arguments[$key]}}")
+                else
+                    array=()
+                fi
+                array+=("${(@kv)${(P)key}}")
+                arguments[$key]="${(@qq)${array[@]}}"
+                ;;
+            * )
+                key="${1/%=*/=}"
+                case "$key" in
+                    *+= )
+                        key="${key%+=}"
+                        value="${1#*=}"
+                        arrays[$key]=0
+                        if (( ${+arguments[$key]} )); then
+                            array=("${(@Q)${(@z)arguments[$key]}}")
+                        else
+                            array=()
+                        fi
+                        array+=("$value")
+                        arguments[$key]="${(@qq)${array[@]}}"
+                        ;;
+                    *= )
+                        key="${key%=}"
+                        value="${1#*=}"
+                        scalars[$key]=0
+                        arguments[$key]=${value:q}
+                        ;;
+                    * )
+                        remainder+=("$1")
+                        ;;
+                esac
+                ;;
+        esac
+        shift
+    done
+    local variable
+    for variable in "${(@k)associative_arrays}"; do
+        print -R "typeset -A $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)arrays}"; do
+        print -R "typeset -a $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)scalars}"; do
+        print -R "typeset $variable=$arguments[$variable]"
+    done
+    [[ 0 -eq ${#remainder[@]} ]] && print -R "set --" || print -R "set -- ${(@qq)remainder[@]}"
+}
+
 
 barnctl_get_array() {
     [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
@@ -470,9 +530,10 @@ barnctl_command_configure() {
 }
 
 barnctl_command_generate() {
-    eval "$(barnctl_parse_arguments generate "h,help" -- "$@")"
+    typeset o_include='*'
+    eval "$(barnctl_parse_arguments generate "h,help" "i,include:" "e,exclude:" -- "$@")"
 
-    typeset generate now=$(date +%s)
+    typeset configuration generate now=$(date +%s)
 
     generate="$({
         barnctl_shell_resource barnctl_common
@@ -482,7 +543,24 @@ barnctl_command_generate() {
 
     for configuration in "$@"; do
         [[ ${configuration#*.} != zsh ]] && continue
-        zsh -c "$generate" -- "$configuration" || exit 1
+        zsh -c "$generate" -- "$o_include" "$o_exclude" "$configuration" || exit 1
+    done
+}
+
+barnctl_command_inventory() {
+    eval "$(barnctl_parse_arguments inventory "h,help" -- "$@")"
+
+    typeset inventory configuration
+
+    inventory="$({
+        barnctl_shell_resource barnctl_common
+        print ''
+        barnctl_shell_resource barnctl_inventory
+    })"
+
+    for configuration in "$@"; do
+        [[ ${configuration#*.} != zsh ]] && continue
+        zsh -c "$inventory" -- "$configuration" || exit 1
     done
 }
 
@@ -611,81 +689,23 @@ main() {
     source "${o_barnyard[barnyard]}/modules/$module/configure.zsh"
 }
 
-echo foo "$@" bar
-
 main "$@"
 ___ barnctl_generate ___
-@_args() {
-    local key value
-    typeset -A arguments arrays associative_arrays scalars seen
-    typeset -a array remainder
-    while (( $# != 0 )); do
-        key="${1/%=*/=}"
-        case "$1" in
-            %* )
-                key=${1#%}
-                associative_arrays[$key]=0
-                if (( ${+arguments[$key]} )); then
-                    array=("${(@Q)${(@z)arguments[$key]}}")
-                else
-                    array=()
-                fi
-                array+=("${(@kv)${(P)key}}")
-                arguments[$key]="${(@qq)${array[@]}}"
-                ;;
-            * )
-                key="${1/%=*/=}"
-                case "$key" in
-                    *+= )
-                        key="${key%+=}"
-                        value="${1#*=}"
-                        arrays[$key]=0
-                        if (( ${+arguments[$key]} )); then
-                            array=("${(@Q)${(@z)arguments[$key]}}")
-                        else
-                            array=()
-                        fi
-                        array+=("$value")
-                        arguments[$key]="${(@qq)${array[@]}}"
-                        ;;
-                    *= )
-                        key="${key%=}"
-                        value="${1#*=}"
-                        scalars[$key]=0
-                        arguments[$key]=${value:q}
-                        ;;
-                    * )
-                        remainder+=("$1")
-                        ;;
-                esac
-                ;;
-        esac
-        shift
-    done
-    local variable
-    for variable in "${(@k)associative_arrays}"; do
-        print -R "typeset -A $variable=($arguments[$variable])"
-    done
-    for variable in "${(@k)arrays}"; do
-        print -R "typeset -a $variable=($arguments[$variable])"
-    done
-    for variable in "${(@k)scalars}"; do
-        print -R "typeset $variable=$arguments[$variable]"
-    done
-    [[ 0 -eq ${#remainder[@]} ]] && print -R "set --" || print -R "set -- ${(@qq)remainder[@]}"
-}
-
 machine() {
     local hostname=${1:-}
     shift
     o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
-    rm -rf "machines/${hostname}"
-    mkdir -p "machines/${hostname}"
-    touch "machines/${hostname}/.generated"
+    __o_registers[excluded]=1
+    if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
+        __o_registers[excluded]=0
+        rm -rf "machines/${hostname}"
+        mkdir -p "machines/${hostname}"
+    fi
 }
 
 @() {
+    (( $__o_registers[excluded] )) && return
     local module=${1:-}
     shift
     [[ -z "$module" ]] && abend<<'    EOF'
@@ -714,12 +734,12 @@ machine() {
                 if (( ${#${(@P)value}[@]} )); then
                     key="${1%%@=*}"
                     for value in "${(@P)value}"; do
-                        print -R "$key+=$value" >> "$filename"
+                        printf '%s+=%s\n' "$key" "$value" >> "$filename"
                     done
                 fi
                 ;;
             *+= | *\= )
-                print -R "$1" >> "$filename"
+                printf '%s\n' "$1" >> "$filename"
                 ;;
             %* )
                 value="${1#%}"
@@ -751,7 +771,31 @@ machine() {
 }
 
 main() {
-    declare -A o_barnyard __o_registers
+    typeset -A o_barnyard __o_registers
+    o_barnyard[include]=${1:-}
+    o_barnyard[exclude]=${2:-}
+    o_barnyard[conifguration]=${3:-}
+    shift 3
+    echo do
+    source "$o_barnyard[conifguration]"
+    echo done
+}
+
+main "$@"
+___
+___ barnctl_inventory ___
+function @ {
+    true
+}
+
+function machine {
+    local hostname=${1:-}
+    shift
+    printf '<machine>: %s\n' "$hostname"
+}
+
+function main {
+    typeset -A o_barnyard __o_registers
     o_barnyard[conifguration]=${1:-}
     shift
     source "$o_barnyard[conifguration]"
