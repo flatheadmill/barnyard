@@ -449,26 +449,35 @@ barnctl_command_bootstrap() {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    local server=${1:-} slurp
+
+    # We get into trouble when a file does not end with a new line and we try to
+    # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
+    # line. So, we read our files into a varaible using `$(cat)` so that the
+    # process substituion will strip all new lines. We know there are none so we
+    # can add just one.
 
     {
         if [[ -v o_known ]]; then
-            print -R 'cat <<EOF | barnyard ssh known-hosts --version='$VERSION' - || exit 1'
-            cat "$o_known"
-            print -R EOF
+            slurp=$(cat "$o_known")
+            printf 'cat <<EOF | barnyard ssh known-hosts --version=%q - || exit 1\n' $VERSION
+            printf '%s\n' "$slurp"
+            print EOF
         fi
         if [[ -v o_ssh ]]; then
-            print -R 'cat <<EOF | barnyard ssh private-key --version='$VERSION' - || exit 1'
-            cat "$o_ssh"
-            print -R EOF
+            slurp=$(cat "$o_ssh")
+            printf 'cat <<EOF | barnyard ssh private-key --version=%q - || exit 1\n' $VERSION
+            printf '%s\n' "$slurp"
+            print EOF
         fi
         for gpg in "${o_gpg[@]}"; do
-            print -R 'cat <<EOF | barnyard gpg import --version='$VERSION' - || exit 1'
-            cat "$gpg"
-            print -R EOF
+            slurp=$(cat "$gpg")
+            printf 'cat <<EOF | barnyard gpg import --version=%q - || exit 1\n' $VERSION
+            printf '%s\n' "$slurp"
+            print EOF
         done
         if [[ -v o_clone ]]; then
-            print -R 'barnyard clone --version='$VERSION' '"${o_clone:q} || exit 1"
+            printf 'barnyard clone --version=%q %q || exit 1\n' $VERSION "$o_clone"
         fi
     } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
