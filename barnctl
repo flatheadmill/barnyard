@@ -557,7 +557,8 @@ barnctl_command_generate() {
 }
 
 barnctl_command_inventory() {
-    eval "$(barnctl_parse_arguments inventory "h,help" -- "$@")"
+    typeset o_include='*'
+    eval "$(barnctl_parse_arguments inventory "h,help" "i,include:" "e,exclude:" -- "$@")"
 
     typeset inventory configuration
 
@@ -569,7 +570,7 @@ barnctl_command_inventory() {
 
     for configuration in "$@"; do
         [[ ${configuration#*.} != zsh ]] && continue
-        zsh -c "$inventory" -- "$configuration" || exit 1
+        zsh -c "$inventory" -- "$o_include" "$o_exclude" "$configuration" || exit 1
     done
 }
 
@@ -783,10 +784,10 @@ main() {
     typeset -A o_barnyard __o_registers
     o_barnyard[include]=${1:-}
     o_barnyard[exclude]=${2:-}
-    o_barnyard[conifguration]=${3:-}
+    o_barnyard[configuration]=${3:-}
     shift 3
     echo do
-    source "$o_barnyard[conifguration]"
+    source "$o_barnyard[configuration]"
     echo done
 }
 
@@ -800,14 +801,18 @@ function @ {
 function machine {
     local hostname=${1:-}
     shift
-    printf '<machine>: %s\n' "$hostname"
+    if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
+        printf '<machine>: %s\n' "$hostname"
+    fi
 }
 
 function main {
     typeset -A o_barnyard __o_registers
-    o_barnyard[conifguration]=${1:-}
+    o_barnyard[include]=${1:-}
+    o_barnyard[exclude]=${2:-}
+    o_barnyard[configuration]=${3:-}
     shift
-    source "$o_barnyard[conifguration]"
+    source "$o_barnyard[configuration]"
 }
 
 main "$@"
