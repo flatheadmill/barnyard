@@ -802,7 +802,9 @@ function machine {
     local hostname=${1:-}
     shift
     if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
-        printf '<machine>: %s\n' "$hostname"
+        printf '<machine>: '
+        printf ' %q' "$hostname" "$@"
+        printf '\n'
     fi
 }
 
