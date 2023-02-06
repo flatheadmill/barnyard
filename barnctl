@@ -533,7 +533,9 @@ barnctl_command_configure() {
             o_module[_module]=$module
         fi
         if [[ -e modules/$o_module[_module]/configure.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $o_force || exit 1
+            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $o_force || abend<<'            EOF'
+                module \`$module\` failed
+            EOF
         fi
     done
 }
