@@ -125,7 +125,7 @@ zsh_parse_arguments() {
                 # NB Oh, it's one or for an array, but for strings we start from zero. I see.
                 flag=${args[$i]:0:2}
                 [[ -z "${arguments[$flag]}" ]] && { print -R "$error $context unknown ${flag:q}"; return; }
-                eval "${arguments[$flag]}"
+                arg=( "${(@Q)${(@z)${arguments[$flag]}}}" )
                 case "x$arg[kind]" in
                     x: | x@ )
                         if [[ ${#args[$i]} -eq 2 ]]; then
@@ -171,6 +171,7 @@ zsh_parse_arguments() {
                 fi
                 ;;
             * )
+                echo "$i ${(@)args} ${#args}"
                 (( i <= ${#args[@]} )) || { print -R "$error $context arg_missing ${flag:q}"; return; }
                 if [[ "$localized[$arg[variable]]" != 1 ]]; then
                     printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != %s ]] } && typeset%s %s\n' \
@@ -213,7 +214,7 @@ zsh_parse_arguments() {
         esac
     done
 
-    (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@)args[$i,-1]:q}}"
+    (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@qq)${(@)args[$i,-1]}}}"
 }
 
 acrectl_parse_arguments_error() {
@@ -572,6 +573,7 @@ barnctl_command_inventory() {
 
     for configuration in "$@"; do
         [[ ${configuration#*.} != zsh ]] && continue
+        echo ">>$o_include<< >>$o_exclude<<"
         zsh -c "$inventory" -- "$o_include" "$o_exclude" "$configuration" || exit 1
     done
 }

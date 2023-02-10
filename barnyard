@@ -145,7 +145,7 @@ zsh_parse_arguments() {
                 # NB Oh, it's one or for an array, but for strings we start from zero. I see.
                 flag=${args[$i]:0:2}
                 [[ -z "${arguments[$flag]}" ]] && { print -R "$error $context unknown ${flag:q}"; return; }
-                eval "${arguments[$flag]}"
+                arg=( "${(@Q)${(@z)${arguments[$flag]}}}" )
                 case "x$arg[kind]" in
                     x: | x@ )
                         if [[ ${#args[$i]} -eq 2 ]]; then
@@ -233,7 +233,7 @@ zsh_parse_arguments() {
         esac
     done
 
-    (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@)args[$i,-1]:q}}"
+    (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@qq)${(@)args[$i,-1]}}}"
 }
 
 barnyard_argument_error() {
