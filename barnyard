@@ -190,7 +190,6 @@ zsh_parse_arguments() {
                 fi
                 ;;
             * )
-                echo "$i ${(@)args} ${#args}"
                 (( i <= ${#args[@]} )) || { printf '%s arg_missing %s %q\n' $error $context "$flag"; return; }
                 if [[ "$localized[$arg[variable]]" != 1 ]]; then
                     printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != %s ]] } && typeset%s %s\n' \

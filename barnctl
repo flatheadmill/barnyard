@@ -170,7 +170,6 @@ zsh_parse_arguments() {
                 fi
                 ;;
             * )
-                echo "$i ${(@)args} ${#args}"
                 (( i <= ${#args[@]} )) || { printf '%s arg_missing %s %q\n' $error $context "$flag"; return; }
                 if [[ "$localized[$arg[variable]]" != 1 ]]; then
                     printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != %s ]] } && typeset%s %s\n' \
@@ -572,7 +571,6 @@ barnctl_command_inventory() {
 
     for configuration in "$@"; do
         [[ ${configuration#*.} != zsh ]] && continue
-        echo ">>$o_include<< >>$o_exclude<<"
         zsh -c "$inventory" -- "$o_include" "$o_exclude" "$configuration" || exit 1
     done
 }
