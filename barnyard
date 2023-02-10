@@ -57,7 +57,7 @@ zsh_parse_arguments() {
                 shift
 
                 regex='^([a-zA-Z0-9]{0,2}),([^%@:#!]*)([%@:#!]?)(.*)$'
-                [[ "$pattern" =~ $regex ]] || { print -R "error definition ${1:q}"; return; }
+                [[ "$pattern" =~ $regex ]] || { printf '%s definition %q' $error "$1"; return; }
                 short=${match[1]} long=${match[2]} arg[kind]=${match[3]} arg[remainder]="${match[4]}"
 
                 [[ -z "$arg[variable]" ]] && {
@@ -128,7 +128,7 @@ zsh_parse_arguments() {
             --* )
                 arged=0
                 regex='^(--[-a-zA-Z0-9]+)(=.*)?$'
-                [[ "${args[$i]}" =~ $regex ]] || { print -R "$error $context unknown ${1:q}"; return; }
+                [[ "${args[$i]}" =~ $regex ]] || { printf '%s unknown %s %q\n' $error $context "$1"; return; }
                 long="${match[1]}"
                 if [[ "$match[2]" != '' ]]; then
                     arged=1
@@ -137,14 +137,14 @@ zsh_parse_arguments() {
                     ((i++))
                 fi
                 flag=$long
-                [[ -z "${arguments[$long]}" ]] && { print -R "$error $context unknown ${long:q}"; return; }
+                [[ -z "${arguments[$long]}" ]] && { printf '%s unknown %s %q\n' $error $context "$long"; return; }
                 arg=( "${(@Q)${(@z)${arguments[$long]}}}" )
                 ;;
             -* )
                 arged=0
                 # NB Oh, it's one or for an array, but for strings we start from zero. I see.
                 flag=${args[$i]:0:2}
-                [[ -z "${arguments[$flag]}" ]] && { print -R "$error $context unknown ${flag:q}"; return; }
+                [[ -z "${arguments[$flag]}" ]] && { printf '%s unknown %s %q\n' $error $context "$flag"; return; }
                 arg=( "${(@Q)${(@z)${arguments[$flag]}}}" )
                 case "x$arg[kind]" in
                     x: | x@ )
@@ -172,8 +172,7 @@ zsh_parse_arguments() {
         esac
         case "x$arg[kind]" in
             x | x\# | x\! )
-                # TODO `printf`
-                (( $arged )) && { print -R "$error $context no_args ${flag:q}"; return; }
+                (( $arged )) && { printf '%s no_args %s %q\n' $error $context "$flag"; return; }
                 ;;
         esac
         case "x$arg[kind]" in
@@ -191,7 +190,8 @@ zsh_parse_arguments() {
                 fi
                 ;;
             * )
-                (( i <= ${#args[@]} )) || { print -R "$error $context arg_missing ${flag:q}"; return; }
+                echo "$i ${(@)args} ${#args}"
+                (( i <= ${#args[@]} )) || { printf '%s arg_missing %s %q\n' $error $context "$flag"; return; }
                 if [[ "$localized[$arg[variable]]" != 1 ]]; then
                     printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != %s ]] } && typeset%s %s\n' \
                         "$arg[variable]" "$arg[variable]" \
@@ -245,7 +245,7 @@ barnyard_argument_error() {
             abend 'missing argument `%s` to `%s`' "$1" "$cmd"
             ;;
         * )
-            print -u 2 -R "$cmd" "$kind" "$@"
+            print -u 2 -R -- "$cmd" "$kind" "$@"
             ;;
     esac
     exit 1
