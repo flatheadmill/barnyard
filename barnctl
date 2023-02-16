@@ -501,10 +501,9 @@ barnctl_command_commit() {
     ssh "$server" "/usr/local/bin/barnyard commit --version $VERSION"
 }
 
-barnctl_command_configure() {
-    eval "$(barnctl_parse_arguments apply "h,help" "f,force" -- "$@")"
-    typeset hostname=${1:-}
-    shift
+function configure_or_unconfigure {
+    typeset operation=${1:-} hostname=${2:-}
+    shift 2
     [[ -d age && -d machines && -d modules ]] || abend<<'    EOF'
         error: barnyard utilties must be run in the barnyard directory
     EOF
@@ -513,11 +512,6 @@ barnctl_command_configure() {
     EOF
     typeset -a modules
     if (( ! $# )); then
-        if (( $o_force )); then
-            abend <<'            EOF'
-                error: refusing to force configuration of all modules'
-            EOF
-        fi
         for module in machines/$hostname/*; do
             modules+=(${module##*/})
         done
@@ -531,12 +525,23 @@ barnctl_command_configure() {
         if [[ -z "$o_module[_module]" ]]; then
             o_module[_module]=$module
         fi
-        if [[ -e modules/$o_module[_module]/configure.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $o_force || abend<<'            EOF'
-                module \`$module\` failed
+        if [[ -e modules/$o_module[_module]/$operation.zsh ]]; then
+            zsh <(barnctl_shell_resource barnctl_configure) \
+                $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $operation || abend<<'            EOF'
+                $operation module \`$module\` failed
             EOF
         fi
     done
+}
+
+barnctl_command_configure() {
+    eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
+    configure_or_unconfigure configure "$@"
+}
+
+barnctl_command_unconfigure() {
+    eval "$(barnctl_parse_arguments unconfigure "h,help" -- "$@")"
+    configure_or_unconfigure unconfigure "$@"
 }
 
 barnctl_command_generate() {
@@ -684,20 +689,19 @@ if [[ "$version" != "$VERSION" ]]; then
     echo "version: $(barnyard version)"
 fi
 ___ barnctl_configure ___
-
 source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barnctl")
 
 shift
 
 main() {
-    declare -A o_barnyard o_module
+    declare -A o_barnyard=( o_force '0' ) o_module o_registers
     typeset module=${3:-}
-    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[force]=${5:-}
+    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[operation]=${5:-}
     shift 3
     o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
     barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    source "${o_barnyard[barnyard]}/modules/$module/configure.zsh"
+    source "${o_barnyard[barnyard]}/modules/$module/${o_barnyard[operation]}.zsh"
 }
 
 main "$@"
