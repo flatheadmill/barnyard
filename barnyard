@@ -480,17 +480,30 @@ barnyard_quotedoc() {
 barnyard_run_() {
     typeset -A o_module barnyard
     typeset -a applied diffs
-    typeset module program code
+    typeset module arg args program code
 
     barnyard=( "${(@kv)o_barnyard}" )
 
     while (( $# )); do
         module=${1:-}
         shift
-        program=${module#*/}
-        module=${module%%/*}
-        [[ $program = $module ]] && program=apply.zsh
-
+        args=()
+        while (( $# )); do
+            arg=${1:-}
+            if [[ "${arg}" =~ ".*\.zsh" ]]; then
+                # must be a module
+                break;
+            elif [[ "${arg}" == '--' ]]; then
+                # no more modules
+                shift
+                args+=(${@})
+                shift $#
+            else
+                # must be an argument
+                args+="${arg}"
+                shift
+            fi
+        done
         # ERROR Now we are stomping the parent context when we run `barnyard_always`.
         barnyard[configuration]="$barnyard[archive]/machines/$barnyard[hostname]/$module"
         barnyard[resources]="$barnyard[archive]/resources/$barnyard[hostname]"
@@ -543,7 +556,7 @@ barnyard_run_() {
         barnyard[module]="$module"
         export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
         export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
-        zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/modules/$o_module[_module]/$program"
+        zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/modules/$o_module[_module]/$program" "${args}"
         code=$?
         (( $code )) && log err code=$code module="$module" 'module %s exited %d' "$module" $code && return $code
 
