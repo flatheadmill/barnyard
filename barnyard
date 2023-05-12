@@ -479,84 +479,81 @@ barnyard_quotedoc() {
 
 barnyard_run_() {
     typeset -A o_module barnyard
-    typeset -a applied diffs
+    typeset -a applied diffs args
     typeset module program code
 
     barnyard=( "${(@kv)o_barnyard}" )
 
-    while (( $# )); do
-        module=${1:-}
-        shift
-        program=${module#*/}
-        module=${module%%/*}
-        [[ $program = $module ]] && program=apply.zsh
+    module=${1:-}
+    args=("${@:2}")
+    program=${module#*/}
+    module=${module%%/*}
+    [[ $program = $module ]] && program=apply.zsh
 
-        # ERROR Now we are stomping the parent context when we run `barnyard_always`.
-        barnyard[configuration]="$barnyard[archive]/machines/$barnyard[hostname]/$module"
-        barnyard[resources]="$barnyard[archive]/resources/$barnyard[hostname]"
-        barnyard[age]="$(<"$barnyard[archive]/age/$barnyard[hostname]")" || \
-            abend module=$module hostname="$barnyard[hostname]" 'age key missing for $%s' "$barnyard[hostname]"
+    # ERROR Now we are stomping the parent context when we run `barnyard_always`.
+    barnyard[configuration]="$barnyard[archive]/machines/$barnyard[hostname]/$module"
+    barnyard[resources]="$barnyard[archive]/resources/$barnyard[hostname]"
+    barnyard[age]="$(<"$barnyard[archive]/age/$barnyard[hostname]")" || \
+        abend module=$module hostname="$barnyard[hostname]" 'age key missing for $%s' "$barnyard[hostname]"
 
-        o_module=()
+    o_module=()
 
-        [[ -e "$barnyard[configuration]" ]] || abend 'no configuration for module %s' "$module"
-        barnyard_read_config o_module "$barnyard[configuration]" _apply once _module "$module"
+    [[ -e "$barnyard[configuration]" ]] || abend 'no configuration for module %s' "$module"
+    barnyard_read_config o_module "$barnyard[configuration]" _apply once _module "$module"
 
-        mkdir -p /var/lib/barnyard/applied
+    mkdir -p /var/lib/barnyard/applied
 
+    applied=()
+    diffs=()
 
-        applied=()
-        diffs=()
-
-        case "$o_registers[always]-$o_module[_apply]" in
-            yes-* | *-always )
-                log module="$module" program="$program" 'module %s run set to always, applying' "$module"
-                ;;
-            *-once )
-                if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
+    case "$o_registers[always]-$o_module[_apply]" in
+        yes-* | *-always )
+            log module="$module" program="$program" 'module %s run set to always, applying' "$module"
+            ;;
+        *-once )
+            if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
+                log module="$module" program="$program" "already applied module %s" "$module"
+                continue
+            fi
+            ;;
+        *-diff )
+            if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
+                read -r -A applied < "/var/lib/barnyard/applied/$module"
+                if [[ "$applied[1]" = "$barnyard[sha1]" ]]; then
                     log module="$module" program="$program" "already applied module %s" "$module"
                     continue
                 fi
-                ;;
-            *-diff )
-                if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
-                    read -r -A applied < "/var/lib/barnyard/applied/$module"
-                    if [[ "$applied[1]" = "$barnyard[sha1]" ]]; then
-                        log module="$module" program="$program" "already applied module %s" "$module"
-                        continue
-                    fi
-                    barnyard_get_array o_module _diff diffs
-                    diffs+=("machines/$barnyard[hostname]/$module")
-                    if git -C "$o_registers[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
-                        log module="$module" program="$program" "module %s has not changed, skipping" "$module"
-                        continue
-                    fi
-                    log module="$module" program="$program" "module %s has changed, re-applying" "$module"
+                barnyard_get_array o_module _diff diffs
+                diffs+=("machines/$barnyard[hostname]/$module")
+                if git -C "$o_registers[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
+                    log module="$module" program="$program" "module %s has not changed, skipping" "$module"
+                    continue
                 fi
-                ;;
-            *-never )
-                log module="$module" program="$program" "module % run set to never, skipping" "$module"
-                continue
-                ;;
-        esac
+                log module="$module" program="$program" "module %s has changed, re-applying" "$module"
+            fi
+            ;;
+        *-never )
+            log module="$module" program="$program" "module % run set to never, skipping" "$module"
+            continue
+            ;;
+    esac
 
-        barnyard[module]="$module"
-        export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
-        export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
-        zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/modules/$o_module[_module]/$program"
-        code=$?
-        (( $code )) && log err code=$code module="$module" 'module %s exited %d' "$module" $code && return $code
+    barnyard[module]="$module"
+    export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
+    export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
+    zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/modules/$o_module[_module]/$program" "${args[@]}"
+    code=$?
+    (( $code )) && log err code=$code module="$module" 'module %s exited %d' "$module" $code && return $code
 
-        if [[
-            "$o_registers[repository]" = /var/lib/barnyard/repository && \
-            "$program" = apply.zsh && \
-            "$o_registers[always]" = no \
-        ]]; then
-            mkdir -p /var/lib/barnyard/applied
-            log module="$module" "marking module %s as applied" "$module"
-            git -C "$o_registers[repository]" log -n 1 --format='%H %at' "$barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
-        fi
-    done
+    if [[
+        "$o_registers[repository]" = /var/lib/barnyard/repository && \
+        "$program" = apply.zsh && \
+        "$o_registers[always]" = no \
+    ]]; then
+        mkdir -p /var/lib/barnyard/applied
+        log module="$module" "marking module %s as applied" "$module"
+        git -C "$o_registers[repository]" log -n 1 --format='%H %at' "$barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
+    fi
 }
 ___
 barnyard_version_check() {
