@@ -28,12 +28,12 @@ export BARNYARD_PATH=${${0:a}%/*}
 VERSION=$(zsh $BARNYARD_PATH/barnctl version)
 
 function zsh_parse_arguments {
-    local error=${${1:-}:q} context=${${2:-}:q}
+    typeset error=${${1:-}:q} context=${${2:-}:q}
     shift 2
 
     # TODO -hfoo will become $o_help and then set -- foo
     typeset -A arguments declared localized arg
-    local regex short long remainder
+    typeset regex short long remainder
 
     while :
     do
@@ -104,7 +104,7 @@ function zsh_parse_arguments {
     done
 
     typeset -a args=( "$@" ) split
-    local i=1 arged flag negated delimiter
+    typeset i=1 arged flag negated delimiter
     while (( i <= ${#args[@]} )); do
         negated=0
         case "${args[$i]}" in
@@ -236,7 +236,7 @@ function zsh_parse_arguments {
 }
 
 function barnyard_argument_error {
-    local cmd=${1:-} kind=${2:-}
+    typeset cmd=${1:-} kind=${2:-}
     shift 2
     cmd=${${cmd/#root/barnyard}//_/ }
     case "$kind" in
@@ -261,12 +261,12 @@ IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
 )
 
 function barnyard_next_command {
-    local prefix=${1:-} func
+    typeset prefix=${1:-} func
     shift
     if (( ! $# )); then
         abend '`%s` expects a command argument' "${prefix//_/ }"
     fi
-    local cmd=${1:-}
+    typeset cmd=${1:-}
     shift
     for func in "${BARNCTL_COMMANDS[@]}"; do
         if [[ "$func" = "${prefix}_${cmd}" ]]; then
@@ -317,8 +317,8 @@ function barnyard_string_resource {
 }
 
 function barnyard_write_config {
-    local map=${1:-} file=${2:-}
-    declare -a fields
+    typeset map=${1:-} file=${2:-}
+    typeset -a fields
     for key value in "${(@kv)${(P)map}}"; do
         fields+=("${key}=${value}")
     done
@@ -333,7 +333,7 @@ function barnyard_get_array_redux {
     if [[ -n "${${(P)1}[$2]}" ]]; then
         : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
     else
-        local empty=()
+        typeset -a empty=()
         : ${(PA)3::=${empty[@]}}
     fi
 }
@@ -352,7 +352,7 @@ function barnyard_extract {
 }
 
 function barnyard_read_config_ {
-    local file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
+    typeset file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
     shift 2
     while [[ $# -ne 0 ]]; do
         barnyard_read_config[$1]=${2:-}
@@ -361,7 +361,7 @@ function barnyard_read_config_ {
     typeset -a array
     while read -r line; do
         [[ "$line" =~ $regex ]] || abend bad_config "$config"
-        local key=$match[1] element_type=$match[2] value=$match[3]
+        typeset key=$match[1] element_type=$match[2] value=$match[3]
         case "$element_type" in
             += )
                 if (( ${+barnyard_read_config[$key]} )); then
@@ -381,7 +381,7 @@ function barnyard_read_config_ {
 
 function barnyard_read_config {
     [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
-    declare -A barnyard_read_config
+    typeset -A barnyard_read_config
     barnyard_read_config_ "$@"
     : ${(PA)${1:-reply}::=${(@kv)barnyard_read_config}}
 }
@@ -394,7 +394,7 @@ function abend {
 function log {
     SALT=a5bbeb04f50fcdee70b0b5976438a8d8
 
-    local priority level
+    typeset priority level
     if [[ -z "${PRIORITY[$1]-}" ]]; then
         priority=info
     else
@@ -403,8 +403,8 @@ function log {
     fi
 
 
-    declare -a journald syslog
-    local name value regex='^([^=]+)=(.*)$'
+    typeset -a journald syslog
+    typeset name value regex='^([^=]+)=(.*)$'
     while true; do
         if [[ "$1" =~ $regex ]]; then
             name="${match[1]}" value="${match[2]}"
@@ -430,11 +430,11 @@ function log {
         return
     fi
 
-    local format="$1" message
+    typeset format="$1" message
     shift
     message=$(printf "$format\n" "$@")
 
-    local context=''
+    typeset context=''
     if [[ ${#syslog[@]} -ne 0 ]]; then
         context="; ${(j:, :)syslog}"
     fi
@@ -462,18 +462,18 @@ function barnyard_display {
 
 function barnyard_divider {
     (( $o_barnyard[quiet] )) && return
-    local label="$1"
-    local bar=--------------------------------------------------------------------------------
+    typeset label="$1"
+    typeset bar=--------------------------------------------------------------------------------
     shift
-    local prefix="------- $label "
+    typeset prefix="------- $label "
     print -R "$bar"
     print -R "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
     print -R "$bar"
 }
 
 function barnyard_quotedoc {
-    local heredoc spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
-    declare -a lines
+    typeset heredoc spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
+    typeset -a lines
     while read -r line; do
         lines+=("$line")
         if [[ "$line" =~ $leading ]]; then
@@ -645,7 +645,7 @@ function barnyard_apply {
             # TODO Not a good check, check harder.
             [[ -d "$o_barnyard[repository]" ]] || abend 'no barnyard at path %s' "${o_barnyard[repository]:q}"
 
-            local barnyard_user
+            typeset barnyard_user
             barnyard_user=$(stat -c '%U' "${o_barnyard[repository]}/conf/.git/index") || abend 'not a git repo %s' "$o_barnyard[repository]"
 
             [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[repository]:q}"
@@ -767,7 +767,7 @@ function command_barnyard_clone {
     barnyard_version_check
 
     (( $# )) || abend 'a git repository url is required'
-    local repository=${1:-}
+    typeset repository=${1:-}
 
     [[ -e /etc/barnyard/id_barnyard ]] || abend 'no barnyard ssh key'
 
@@ -807,13 +807,13 @@ function command_barnyard_gpg_import {
 
     export GNUPGHOME=/etc/barnyard/gnupg
 
-    local filename=${1:-} gpg_key
+    typeset filename=${1:-} gpg_key
     if [[ "$filename" = - ]]; then
         filename=/dev/stdin
     fi
     gpg_key=$(< "$filename") || abend 'unable to read gpg key'
 
-    local fingerprint=$( \
+    typeset fingerprint=$( \
         print -R "$gpg_key" | \
             gpg --with-colons --import-options show-only --import --fingerprint 2>/dev/null | \
             awk -F: '/^fpr/ { print $10; exit }' \
@@ -897,7 +897,7 @@ function command_barnyard_ssh_known-hosts {
 
     (( $# )) || abend 'a file name is required'
 
-    local filename=${1:-} gpg_key
+    typeset filename=${1:-} gpg_key
     if [[ "$filename" = - ]]; then
         filename=/dev/stdin
     fi
@@ -918,7 +918,7 @@ function command_barnyard_ssh_private-key {
 
     (( $# )) || abend 'a file name is required'
 
-    local filename=${1:-} gpg_key
+    typeset filename=${1:-} gpg_key
     if [[ "$filename" = - ]]; then
         filename=/dev/stdin
     fi

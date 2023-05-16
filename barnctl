@@ -8,12 +8,12 @@ function ___ {
 }
 
 function zsh_parse_arguments {
-    local error=${${1:-}:q} context=${${2:-}:q}
+    typeset error=${${1:-}:q} context=${${2:-}:q}
     shift 2
 
     # TODO -hfoo will become $o_help and then set -- foo
     typeset -A arguments declared localized arg
-    local regex short long remainder
+    typeset regex short long remainder
 
     while :
     do
@@ -84,7 +84,7 @@ function zsh_parse_arguments {
     done
 
     typeset -a args=( "$@" ) split
-    local i=1 arged flag negated delimiter
+    typeset i=1 arged flag negated delimiter
     while (( i <= ${#args[@]} )); do
         negated=0
         case "${args[$i]}" in
@@ -230,7 +230,7 @@ IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
 )
 
 function barnctl_next_command {
-    local prefix=$1 command=$2
+    typeset prefix=$1 command=$2
     shift 2
     for func in "${BARNCTL_COMMANDS[@]}"; do
         if [[ "$func" == "$prefix$command" ]]; then
@@ -245,7 +245,7 @@ function barnctl_next_command {
 
 ___ barnctl_common ___
 function @_args {
-    local key value
+    typeset key value
     typeset -A arguments arrays associative_arrays scalars seen
     typeset -a array remainder
     while (( $# != 0 )); do
@@ -291,7 +291,7 @@ function @_args {
         esac
         shift
     done
-    local variable
+    typeset variable
     for variable in "${(@k)associative_arrays}"; do
         print -R "typeset -A $variable=($arguments[$variable])"
     done
@@ -310,16 +310,16 @@ function barnctl_get_array {
 }
 
 function barnctl_read_config_ {
-    local file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
+    typeset file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
     shift 2
     while [[ $# -ne 0 ]]; do
         barnctl_read_config[$1]=${2:-}
         shift 2
     done
-    declare -a array
+    typeset -a array
     while read -r line; do
         [[ "$line" =~ $regex ]] || abend bad_config "$config"
-        local key=$match[1] element_type=$match[2] value=$match[3]
+        typeset key=$match[1] element_type=$match[2] value=$match[3]
         case "$element_type" in
             += )
                 if (( ${+barnctl_read_config[$key]} )); then
@@ -339,14 +339,14 @@ function barnctl_read_config_ {
 
 function barnctl_read_config {
     [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
-    declare -A barnctl_read_config
+    typeset -A barnctl_read_config
     barnctl_read_config_ "$@"
     : ${(PA)${1:-reply}::=${(@kv)barnctl_read_config}}
 }
 
 function barnctl_quotedoc {
-    local spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
-    declare -a lines
+    typeset spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
+    typeset -a lines
     while read -r line; do
         lines+=("$line")
         if [[ "$line" =~ $leading && "${#match[1]}" -lt "$spaces" ]]; then
@@ -413,7 +413,7 @@ function barnctl_command_always {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
     shift
 
     ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard always --version $VERSION ${(j: :)${(@)@:q}}"
@@ -426,7 +426,7 @@ function barnctl_command_apply {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard apply --version $VERSION"
 }
@@ -448,7 +448,7 @@ function barnctl_command_bootstrap {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-} slurp
+    typeset server=${1:-} slurp
 
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
@@ -496,7 +496,7 @@ function barnctl_command_commit {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     ssh "$server" "/usr/local/bin/barnyard commit --version $VERSION"
 }
@@ -587,7 +587,7 @@ function barnctl_command_prepare {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     {
         print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
@@ -606,7 +606,7 @@ function barnctl_command_upgrade {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     {
         print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOF"'"
@@ -639,10 +639,10 @@ exit
 
 ___ barnctl_prepare ___
 barnyard_divider() {
-    local label=${1:-}
-    local bar=--------------------------------------------------------------------------------
+    typeset label=${1:-}
+    typeset bar=--------------------------------------------------------------------------------
     shift
-    local prefix="------- $label "
+    typeset prefix="------- $label "
     echo "$bar"
     echo "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
     echo "$bar"
@@ -693,7 +693,7 @@ source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barn
 shift
 
 function {
-    declare -A o_barnyard=( o_force '0' ) o_module o_registers
+    typeset -A o_barnyard=( o_force '0' ) o_module o_registers
     typeset module=${3:-}
     o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[operation]=${5:-}
     shift 3
@@ -704,7 +704,7 @@ function {
 } "$@"
 ___ barnctl_generate ___
 function machine {
-    local hostname=${1:-}
+    typeset hostname=${1:-}
     shift
     o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
@@ -718,16 +718,16 @@ function machine {
 
 function @ {
     (( $__o_registers[excluded] )) && return
-    local module=${1:-}
+    typeset module=${1:-}
     shift
     [[ -z "$module" ]] && abend<<'    EOF'
         error: module name is required
     EOF
-    local regex='[a-z0-9_@]+'
+    typeset regex='[a-z0-9_@]+'
     [[ "${module:1}" =~ $regex ]] || abend<<'    EOF'
         error: invalid module name $module
     EOF
-    local filename key value
+    typeset filename key value
     filename="machines/${o_barnyard[hostname]}/$module"
     print -R "_order=$__o_registers[order]" > "$filename"
     while (( $# != 0 )); do
@@ -799,7 +799,7 @@ function @ {
 }
 
 function machine {
-    local hostname=${1:-}
+    typeset hostname=${1:-}
     shift
     if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
