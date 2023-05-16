@@ -538,6 +538,7 @@ function barnyard_run_ {
                 fi
                 barnyard_get_array o_module _diff diffs
                 diffs+=("machines/$barnyard[hostname]/$module")
+                git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"
                 if git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
                     log module="$module" program="$program" "module %s has not changed, skipping" "$module"
                     return
@@ -562,7 +563,7 @@ function barnyard_run_ {
     if [[
         "$o_barnyard[repository]" = /var/lib/barnyard/repository && \
         "$program" = apply.zsh && \
-        "$o_registers[always]" = no \
+        "$o_barnyard[always]" = no \
     ]]; then
         mkdir -p /var/lib/barnyard/applied
         log module="$module" "marking module %s as applied" "$module"
@@ -604,160 +605,60 @@ function barnyard_order_modules {
     done
 }
 
-function barnyard_apply_for_real {
-    barnyard_version_check
-
-    typeset -a modules=( "$@" )
-
-    [[ -e /etc/barnyard/config ]] || abend 'barnyard not installed'
-    barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet $o_quiet "${(@kv)o_barnyard}"
-
-    export GNUPGHOME=/etc/barnyard/gnupg
-    export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
-    if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
-
-        if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
-            o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
-        fi
-
-        git -C "${o_barnyard[repository]}" fetch -q
-
-        typeset sha1 conf code
-        typeset -a current
-        if [[ -n "$o_barnyard[sha1]" ]]; then
-            read -r -A current <<< "$(git -C ${o_barnyard[repository]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
-        fi
-
-        o_barnyard[archive]=$BARNYARD_TEMP/run
-        barnyard_extract $o_barnyard[conf] $BARNYARD_TEMP/run/conf
-        barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
-
-        if (( $# )); then
-            barnyard_run_ "$@"
-        else
-            modules=("${(@f)$(ls "${o_barnyard[archive]}/conf/machines/${o_barnyard[hostname]}")}")
-            barnyard_order_modules "${modules[@]}"
-        fi
-    else
-        [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
-        # TODO Not a good check, check harder.
-        [[ -d "$o_barnyard[repository]" ]] || abend 'no barnyard at path %s' "${o_barnyard[repository]:q}"
-
-        local barnyard_user
-        barnyard_user=$(stat -c '%U' "${o_barnyard[repository]}/conf/.git/index") || abend 'not a git repo %s' "$o_barnyard[repository]"
-
-        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[repository]:q}"
-
-        o_barnyard[archive]="$BARNYARD_TEMP/run"
-        mkdir -p "$BARNYARD_TEMP/run"
-        cp -R "$o_barnyard[repository]"/* "$BARNYARD_TEMP/run"
-        o_barnyard[repository]="$o_barnyard[repository]/conf"
-        barnyard_run_ "$@"
-    fi
-}
-
 function barnyard_apply {
-    BARNYARD_TEMP="$(mktemp -d)"
+    export BARNYARD_TEMP="$(mktemp -d)"
     {
-        barnyard_apply_for_real "$@"
+        barnyard_version_check
+
+
+        [[ -e /etc/barnyard/config ]] || abend 'barnyard not installed'
+        barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet $o_quiet "${(@kv)o_barnyard}"
+
+        export GNUPGHOME=/etc/barnyard/gnupg
+        export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
+        if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
+            if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
+                o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
+            fi
+
+            git -C "${o_barnyard[repository]}" fetch -q
+
+            typeset sha1 conf code
+            typeset -a current
+            if [[ -n "$o_barnyard[sha1]" ]]; then
+                read -r -A current <<< "$(git -C ${o_barnyard[repository]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
+            fi
+
+            o_barnyard[archive]=$BARNYARD_TEMP/run
+            barnyard_extract $o_barnyard[conf] $BARNYARD_TEMP/run/conf
+            barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
+
+            if (( $# )); then
+                barnyard_run_ "$@"
+            else
+                typeset -a modules
+                modules=("${(@f)$(ls "${o_barnyard[archive]}/conf/machines/${o_barnyard[hostname]}")}")
+                barnyard_order_modules "${modules[@]}"
+            fi
+        else
+            [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
+            # TODO Not a good check, check harder.
+            [[ -d "$o_barnyard[repository]" ]] || abend 'no barnyard at path %s' "${o_barnyard[repository]:q}"
+
+            local barnyard_user
+            barnyard_user=$(stat -c '%U' "${o_barnyard[repository]}/conf/.git/index") || abend 'not a git repo %s' "$o_barnyard[repository]"
+
+            [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[repository]:q}"
+
+            o_barnyard[archive]="$BARNYARD_TEMP/run"
+            mkdir -p "$BARNYARD_TEMP/run"
+            cp -R "$o_barnyard[repository]"/* "$BARNYARD_TEMP/run"
+            o_barnyard[repository]="$o_barnyard[repository]/conf"
+            barnyard_run_ "$@"
+        fi
     } always {
         rm -rf "$BARNYARD_TEMP"
     }
-    exit
-
-    if [[ "$o_registers[repository]" = "/var/lib/barnyard/repository" ]]; then
-        export GNUPGHOME=/etc/barnyard/gnupg
-        export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
-
-        if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
-            o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
-        fi
-    else
-        [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
-        [[ -e "$o_registers[repository]" ]] || abend 'no barnyard at path %s' "${o_registers[repository]:q}"
-
-        local barnyard_user
-        barnyard_user=$(stat -c '%U' "${o_registers[repository]}/.git/index") || abend 'not a git repo %s' "$o_registers[repository]"
-
-        [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_registers[repository]:q}"
-        barnyard_run_ "$@"
-    fi
-
-    barnyard_version_check
-    barnyard_temporary_directory
-
-    if [[ "$o_registers[repository]" == /var/lib/barnyard/repository ]]; then
-        # We also include the date stamp so that we don't apply a commit that
-        # got out of order due to a rebase or merge. Barnyards really ought to
-        # be linear and automated, though.
-
-        typeset sha1 conf code
-        typeset -a current
-        if [[ -n "$o_barnyard[sha1]" ]]; then
-            read -r -A current <<< "$(git -C ${o_registers[repository]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
-        fi
-
-        if (( ${#modules[@]} )); then
-            checkout=( "$current[1]" )
-        else
-            git -C "${o_registers[repository]}" fetch -q
-            conf=$(git_seek $o_barnyard[conf])
-            [[ -z "$conf" ]] && abend 'no valid signature in conf history'
-            print $conf
-            code=$(git_seek $o_barnyard[code])
-            [[ -z "$code" ]] && abend 'no valid signature in code history'
-            print $code
-            exit
-
-            code=$(git_seek $o_barnyard[code])
-
-            if (( ${#current[@]} )); then
-                while read -r line; do
-                    IFS=' ' read -A fields <<< "$line"
-                    if [[ "${fields[3]}" == G && ${fields[2]} -gt ${current[2]} ]]; then
-                        checkout=("${fields[@]}")
-                        break
-                    fi
-                    if [[ "${fields[1]}" == "${current[1]}" ]]; then
-                        break
-                    fi
-                done < <(git -C "${o_registers[repository]}" log --format='%H %at %G?')
-            else
-                while read -r line; do
-                    read -r -A fields <<< "$line"
-                    if [[ "${fields[3]}" == G ]]; then
-                        checkout=("${fields[@]}")
-                        break
-                    fi
-                done < <(git -C "${o_registers[repository]}" log --format='%H %at %G?')
-            fi
-        fi
-
-        # https://stackoverflow.com/a/21941473
-        if (( ${#checkout[@]} )); then
-            o_barnyard[sha1]="${checkout[1]}"
-
-            if ! (( ${#modules[@]} )); then
-                local list="$(ls "${o_registers[repository]}/machines/${o_barnyard[hostname]}")"
-                modules=("${(@f)list}")
-            fi
-
-            # Note here and below that we are stuggling to propagate the exit code.
-            barnyard_clone run
-            if [[ $o_registers[always] = yes ]]; then
-                barnyard_run_ "${(@)modules}"
-            else
-                barnyard_order_modules "${modules[@]}" && \
-                    echo "${checkout[1]}" > "/var/lib/barnyard/sha1/${o_barnyard[hostname]}"
-            fi
-        else
-            log 'no signature since last apply'
-        fi
-    else
-        barnyard_clone run
-        o_barnyard[foo]=
-        barnyard_run_ "${(@)modules}"
-    fi
 }
 
 function command_barnyard_always {
