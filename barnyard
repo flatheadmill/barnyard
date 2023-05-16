@@ -630,7 +630,8 @@ function barnyard_apply {
             fi
 
             o_barnyard[archive]=$BARNYARD_TEMP/run
-            barnyard_extract $o_barnyard[conf] $BARNYARD_TEMP/run/conf
+            barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf
+            o_barnyard[code]=$(<$BARNYARD_TEMP/run/conf/code)
             barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
 
             if (( $# )); then
