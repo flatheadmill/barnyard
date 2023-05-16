@@ -4,7 +4,7 @@ VERSION=0.12.0
 
 SCRIPT_DIR=${${0:a}%/*}
 
-___() {
+function ___ {
 }
 
 function zsh_parse_arguments {
@@ -215,12 +215,12 @@ function zsh_parse_arguments {
     (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@qq)${(@)args[$i,-1]}}}"
 }
 
-acrectl_parse_arguments_error() {
+function acrectl_parse_arguments_error {
     print -R -u 2 -- "$@"
     exit 1
 }
 
-barnctl_parse_arguments() {
+function barnctl_parse_arguments {
     zsh_parse_arguments barnctl_argument_error "$@"
     echo "(( \$o_help )) && usage_$1"
 }
@@ -229,7 +229,7 @@ IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
     sed -n 's/^function barnctl_command_\(.*\) {$/\1/p' "$SCRIPT_DIR/barnctl" \
 )
 
-barnctl_next_command() {
+function barnctl_next_command {
     local prefix=$1 command=$2
     shift 2
     for func in "${BARNCTL_COMMANDS[@]}"; do
@@ -244,7 +244,7 @@ barnctl_next_command() {
 }
 
 ___ barnctl_common ___
-@_args() {
+function @_args {
     local key value
     typeset -A arguments arrays associative_arrays scalars seen
     typeset -a array remainder
