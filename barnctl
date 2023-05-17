@@ -560,6 +560,24 @@ function barnctl_command_generate {
         [[ ${configuration#*.} != zsh ]] && continue
         zsh -c "$generate" -- "$o_include" "$o_exclude" "$configuration" || exit 1
     done
+
+    typeset inventory="$({
+        barnctl_shell_resource barnctl_common
+        print ''
+        barnctl_shell_resource barnctl_inventory
+    })"
+
+    typeset machine
+    while read -r skip machine; do
+        if [[ -f machines/$machine/barnyard ]] && grep -q -e '^disabled=1$' machines/$machine/barnyard; then
+            rm -rf machines/$machine resources/$machine age/$machine
+        fi
+    done < <({
+        for configuration in "$@"; do
+            [[ ${configuration#*.} != zsh ]] && continue
+            zsh -c "$inventory" -- "$o_include" "$o_exclude" "$configuration" || exit 1
+        done
+    })
 }
 
 function barnctl_command_inventory {
@@ -788,9 +806,7 @@ function {
     o_barnyard[exclude]=${2:-}
     o_barnyard[configuration]=${3:-}
     shift 3
-    echo do
     source "$o_barnyard[configuration]"
-    echo done
 } "$@"
 ___
 ___ barnctl_inventory ___
@@ -808,14 +824,12 @@ function machine {
     fi
 }
 
-function main {
+function {
     typeset -A o_barnyard __o_registers
     o_barnyard[include]=${1:-}
     o_barnyard[exclude]=${2:-}
     o_barnyard[configuration]=${3:-}
     shift
     source "$o_barnyard[configuration]"
-}
-
-main "$@"
+} "$@"
 ___
