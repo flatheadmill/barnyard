@@ -621,7 +621,7 @@ function barnyard_apply {
                 o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
             fi
 
-            git -C "${o_barnyard[repository]}" fetch -q
+            git -C "${o_barnyard[repository]}" fetch -q -p
 
             typeset sha1 conf code
             typeset -a current
