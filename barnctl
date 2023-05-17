@@ -560,24 +560,6 @@ function barnctl_command_generate {
         [[ ${configuration#*.} != zsh ]] && continue
         zsh -c "$generate" -- "$o_include" "$o_exclude" "$configuration" || exit 1
     done
-
-    typeset inventory="$({
-        barnctl_shell_resource barnctl_common
-        print ''
-        barnctl_shell_resource barnctl_inventory
-    })"
-
-    typeset machine
-    while read -r skip machine; do
-        if [[ -f machines/$machine/barnyard ]] && grep -q -e '^disabled=1$' machines/$machine/barnyard; then
-            rm -rf machines/$machine resources/$machine age/$machine
-        fi
-    done < <({
-        for configuration in "$@"; do
-            [[ ${configuration#*.} != zsh ]] && continue
-            zsh -c "$inventory" -- "$o_include" "$o_exclude" "$configuration" || exit 1
-        done
-    })
 }
 
 function barnctl_command_inventory {
@@ -724,13 +706,20 @@ ___ barnctl_generate ___
 function machine {
     typeset hostname=${1:-}
     shift
+    typeset enabled=1
+    for argument in "$@"; do
+        [[ "$argument" = 'enabled=0' ]] && enabled=0
+    done
     o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
     __o_registers[excluded]=1
     if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
-        __o_registers[excluded]=0
         rm -rf "machines/${hostname}"
-        mkdir -p "machines/${hostname}"
+        if (( enabled )); then
+            __o_registers[excluded]=0
+            mkdir -p "machines/${hostname}"
+            @ machine "$@"
+        fi
     fi
 }
 
@@ -817,7 +806,11 @@ function @ {
 function machine {
     typeset hostname=${1:-}
     shift
-    if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
+    typeset enabled=1
+    for argument in "$@"; do
+        [[ "$argument" = 'enabled=0' ]] && enabled=0
+    done
+    if [[ $enabled -eq 1 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
         printf ' %q' "$hostname" "$@"
         printf '\n'
