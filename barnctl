@@ -744,7 +744,7 @@ function @ {
     filename="machines/${o_barnyard[hostname]}/$module"
     print -R "_order=$__o_registers[order]" > "$filename"
     while (( $# != 0 )); do
-        if [[ -d "$1" ]]; then
+        if [[ -d "../code/$1" ]]; then
             print -R "_module=${1#modules/}" >> "$filename"
             shift
             continue
