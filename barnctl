@@ -525,7 +525,7 @@ function configure_or_unconfigure {
         if [[ -z "$o_module[_module]" ]]; then
             o_module[_module]=$module
         fi
-        if [[ -e modules/$o_module[_module]/$operation.zsh ]]; then
+        if [[ -e ../code/modules/$o_module[_module]/$operation.zsh ]]; then
             zsh <(barnctl_shell_resource barnctl_configure) \
                 $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $operation || abend<<'            EOF'
                 $operation module \`$module\` failed
@@ -700,7 +700,7 @@ function {
     o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
     barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    source "${o_barnyard[barnyard]}/modules/$module/${o_barnyard[operation]}.zsh"
+    source "${o_barnyard[barnyard]}/../code/modules/$module/${o_barnyard[operation]}.zsh"
 } "$@"
 ___ barnctl_generate ___
 function machine {
