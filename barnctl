@@ -706,10 +706,7 @@ ___ barnctl_generate ___
 function machine {
     typeset hostname=${1:-}
     shift
-    typeset argument enabled=1
-    for argument in "$@"; do
-        [[ "$argument" = 'enabled=0' ]] && enabled=0
-    done
+    typeset enabled=$@[(Ie)enabled=0]
     o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
     __o_registers[excluded]=1
@@ -812,10 +809,7 @@ function @ {
 function machine {
     typeset hostname=${1:-}
     shift
-    typeset enabled=1
-    for argument in "$@"; do
-        [[ "$argument" = 'enabled=0' ]] && enabled=0
-    done
+    typeset enabled=$@[(Ie)enabled=0]
     if [[ $enabled -ne 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
         printf ' %q' "$hostname" "$@"
