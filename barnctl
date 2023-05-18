@@ -715,9 +715,7 @@ function machine {
             __o_registers[excluded]=0
             rm -rf "machines/${hostname}"
             mkdir -p "machines/${hostname}"
-            print here "$@"
             @ machine "$@"
-            print there
         else
             rm -rf "age/${hostname}"
             rm -rf "machines/${hostname}"
