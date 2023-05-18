@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.15.4
+VERSION=0.15.5
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -810,7 +810,7 @@ function machine {
     typeset enabled=$@[(Ie)enabled=0]
     if [[ $enabled -ne 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
-        printf ' %q' "$hostname" "$@"
+        printf ' %q' "$hostname"
         printf '\n'
     fi
 }
