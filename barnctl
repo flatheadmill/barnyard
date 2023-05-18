@@ -816,7 +816,7 @@ function machine {
     for argument in "$@"; do
         [[ "$argument" = 'enabled=0' ]] && enabled=0
     done
-    if [[ $enabled -eq 1 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
+    if [[ $enabled -ne 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
         printf ' %q' "$hostname" "$@"
         printf '\n'
