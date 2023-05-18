@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.15.6
+VERSION=0.15.7
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -706,20 +706,20 @@ ___ barnctl_generate ___
 function machine {
     typeset hostname=${1:-}
     shift
-    typeset enabled=$@[(Ie)enabled=0]
+    typeset disabled=$@[(Ie)enabled=0]
     o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
     __o_registers[excluded]=1
     if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
-        if (( enabled )); then
+        if (( disabled )); then
+            rm -rf "age/${hostname}"
+            rm -rf "machines/${hostname}"
+            rm -rf "resources/${hostname}"
+        else
             __o_registers[excluded]=0
             rm -rf "machines/${hostname}"
             mkdir -p "machines/${hostname}"
             @ machine "$@"
-        else
-            rm -rf "age/${hostname}"
-            rm -rf "machines/${hostname}"
-            rm -rf "resources/${hostname}"
         fi
     fi
 }
@@ -807,8 +807,8 @@ function @ {
 function machine {
     typeset hostname=${1:-}
     shift
-    typeset enabled=$@[(Ie)enabled=0]
-    if [[ $enabled -eq 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
+    typeset disabled=$@[(Ie)enabled=0]
+    if [[ $disabled -eq 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
         printf ' %q' "$hostname"
         printf '\n'
