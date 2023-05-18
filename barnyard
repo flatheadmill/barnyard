@@ -601,7 +601,7 @@ function barnyard_order_modules {
     log info modules="${(j: :)in_order[@]}" 'running modules in order' "${(j: :)in_order[@]}"
 
     for module in "${(@)in_order}"; do
-        barnyard_run_ "$module"
+        barnyard_run_ "$module" || return 1
     done
 }
 
