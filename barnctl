@@ -1,19 +1,19 @@
 #!/usr/bin/env zsh
 
-VERSION=0.12.0
+VERSION=0.15.1
 
 SCRIPT_DIR=${${0:a}%/*}
 
-___() {
+function ___ {
 }
 
-zsh_parse_arguments() {
-    local error=${${1:-}:q} context=${${2:-}:q}
+function zsh_parse_arguments {
+    typeset error=${${1:-}:q} context=${${2:-}:q}
     shift 2
 
     # TODO -hfoo will become $o_help and then set -- foo
     typeset -A arguments declared localized arg
-    local regex short long remainder
+    typeset regex short long remainder
 
     while :
     do
@@ -84,7 +84,7 @@ zsh_parse_arguments() {
     done
 
     typeset -a args=( "$@" ) split
-    local i=1 arged flag negated delimiter
+    typeset i=1 arged flag negated delimiter
     while (( i <= ${#args[@]} )); do
         negated=0
         case "${args[$i]}" in
@@ -215,22 +215,22 @@ zsh_parse_arguments() {
     (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@qq)${(@)args[$i,-1]}}}"
 }
 
-acrectl_parse_arguments_error() {
+function acrectl_parse_arguments_error {
     print -R -u 2 -- "$@"
     exit 1
 }
 
-barnctl_parse_arguments() {
+function barnctl_parse_arguments {
     zsh_parse_arguments barnctl_argument_error "$@"
     echo "(( \$o_help )) && usage_$1"
 }
 
 IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
-    sed -n 's/^barnctl_command_\(.*\)() {$/\1/p' "$SCRIPT_DIR/barnctl" \
+    sed -n 's/^function barnctl_command_\(.*\) {$/\1/p' "$SCRIPT_DIR/barnctl" \
 )
 
-barnctl_next_command() {
-    local prefix=$1 command=$2
+function barnctl_next_command {
+    typeset prefix=$1 command=$2
     shift 2
     for func in "${BARNCTL_COMMANDS[@]}"; do
         if [[ "$func" == "$prefix$command" ]]; then
@@ -244,8 +244,8 @@ barnctl_next_command() {
 }
 
 ___ barnctl_common ___
-@_args() {
-    local key value
+function @_args {
+    typeset key value
     typeset -A arguments arrays associative_arrays scalars seen
     typeset -a array remainder
     while (( $# != 0 )); do
@@ -291,7 +291,7 @@ ___ barnctl_common ___
         esac
         shift
     done
-    local variable
+    typeset variable
     for variable in "${(@k)associative_arrays}"; do
         print -R "typeset -A $variable=($arguments[$variable])"
     done
@@ -305,21 +305,21 @@ ___ barnctl_common ___
 }
 
 
-barnctl_get_array() {
+function barnctl_get_array {
     [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
 }
 
-barnctl_read_config_() {
-    local file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
+function barnctl_read_config_ {
+    typeset file=${2:-} regex='^([^+=]+)(\+?=)(.*)$' line
     shift 2
     while [[ $# -ne 0 ]]; do
         barnctl_read_config[$1]=${2:-}
         shift 2
     done
-    declare -a array
+    typeset -a array
     while read -r line; do
         [[ "$line" =~ $regex ]] || abend bad_config "$config"
-        local key=$match[1] element_type=$match[2] value=$match[3]
+        typeset key=$match[1] element_type=$match[2] value=$match[3]
         case "$element_type" in
             += )
                 if (( ${+barnctl_read_config[$key]} )); then
@@ -337,16 +337,16 @@ barnctl_read_config_() {
     done < "$file"
 }
 
-barnctl_read_config() {
+function barnctl_read_config {
     [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
-    declare -A barnctl_read_config
+    typeset -A barnctl_read_config
     barnctl_read_config_ "$@"
     : ${(PA)${1:-reply}::=${(@kv)barnctl_read_config}}
 }
 
-barnctl_quotedoc() {
-    local spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
-    declare -a lines
+function barnctl_quotedoc {
+    typeset spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
+    typeset -a lines
     while read -r line; do
         lines+=("$line")
         if [[ "$line" =~ $leading && "${#match[1]}" -lt "$spaces" ]]; then
@@ -361,21 +361,21 @@ barnctl_quotedoc() {
     })"
 }
 
-abend() {
+function abend {
     barnctl_quotedoc < /dev/stdin 1>&2
     exit 1
 }
 
-warn() {
+function warn {
     barnctl_quotedoc < /dev/stdin 1>&2
 }
 ___
 
-barnctl_shell_resource() {
+function barnctl_shell_resource {
     awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$SCRIPT_DIR/barnctl"
 }
 
-barnctl_command_systemd_always() {
+function barnctl_command_systemd_always {
     eval "$(barnctl_parse_arguments systemd_always "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
@@ -388,7 +388,7 @@ barnctl_command_systemd_always() {
     ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd always --version $VERSION ${(j: :)${(@)@:q}}"
 }
 
-barnctl_command_systemd_apply() {
+function barnctl_command_systemd_apply {
     eval "$(barnctl_parse_arguments systemd_apply "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
@@ -401,32 +401,32 @@ barnctl_command_systemd_apply() {
     ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd apply --version $VERSION"
 }
 
-barnctl_command_systemd() {
+function barnctl_command_systemd {
     eval "$(barnctl_parse_arguments systemd "h,help" -- "$@")"
     barnctl_next_command systemd_ "$@"
 }
 
-barnctl_command_always() {
+function barnctl_command_always {
     eval "$(barnctl_parse_arguments always "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
     shift
 
     ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard always --version $VERSION ${(j: :)${(@)@:q}}"
 }
 
-barnctl_command_apply() {
+function barnctl_command_apply {
     eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard apply --version $VERSION"
 }
@@ -440,7 +440,7 @@ barnctl_command_apply() {
 # server-side `barnyard` executable has commands to simplify  the construction
 # of the scripts here.
 
-barnctl_command_bootstrap() {
+function barnctl_command_bootstrap {
     typeset -a o_gpg
     eval "$(barnctl_parse_arguments bootstrap h,help g,gpg@ k,known: s,ssh: c,clone: -- "$@")"
 
@@ -448,7 +448,7 @@ barnctl_command_bootstrap() {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-} slurp
+    typeset server=${1:-} slurp
 
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
@@ -481,13 +481,13 @@ barnctl_command_bootstrap() {
     } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
-assert_barnyard_directory() {
-    [[ -d age && -d users && -d machines && -d modules && -d resources ]] || abend<<'    EOF'
+function assert_barnyard_directory {
+    [[ -d age && -d machines && -d ../code && -d resources ]] || abend<<'    EOF'
         error: barnyard utilties must be run in the barnyard directory
     EOF
 }
 
-barnctl_command_commit() {
+function barnctl_command_commit {
     eval "$(barnctl_parse_arguments commit "h,help" -- "$@")"
 
     assert_barnyard_directory
@@ -496,7 +496,7 @@ barnctl_command_commit() {
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     ssh "$server" "/usr/local/bin/barnyard commit --version $VERSION"
 }
@@ -504,9 +504,9 @@ barnctl_command_commit() {
 function configure_or_unconfigure {
     typeset operation=${1:-} hostname=${2:-}
     shift 2
-    [[ -d age && -d machines && -d modules ]] || abend<<'    EOF'
-        error: barnyard utilties must be run in the barnyard directory
-    EOF
+
+    assert_barnyard_directory
+
     [[ -d "machines/$hostname" ]] || abend<<'    EOF'
         error: hostname configuration not found
     EOF
@@ -534,17 +534,17 @@ function configure_or_unconfigure {
     done
 }
 
-barnctl_command_configure() {
+function barnctl_command_configure {
     eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
     configure_or_unconfigure configure "$@"
 }
 
-barnctl_command_unconfigure() {
+function barnctl_command_unconfigure {
     eval "$(barnctl_parse_arguments unconfigure "h,help" -- "$@")"
     configure_or_unconfigure unconfigure "$@"
 }
 
-barnctl_command_generate() {
+function barnctl_command_generate {
     typeset o_include='*'
     eval "$(barnctl_parse_arguments generate "h,help" "i,include:" "e,exclude:" -- "$@")"
 
@@ -562,7 +562,7 @@ barnctl_command_generate() {
     done
 }
 
-barnctl_command_inventory() {
+function barnctl_command_inventory {
     typeset o_include='*'
     eval "$(barnctl_parse_arguments inventory "h,help" "i,include:" "e,exclude:" -- "$@")"
 
@@ -580,14 +580,14 @@ barnctl_command_inventory() {
     done
 }
 
-barnctl_command_prepare() {
+function barnctl_command_prepare {
     eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     {
         print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
@@ -599,14 +599,14 @@ barnctl_command_prepare() {
     } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
-barnctl_command_upgrade() {
+function barnctl_command_upgrade {
     eval "$(barnctl_parse_arguments upgrade "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
     EOF
 
-    local server=${1:-}
+    typeset server=${1:-}
 
     {
         print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOF"'"
@@ -620,17 +620,16 @@ barnctl_command_upgrade() {
     } | ssh "$server" '/usr/bin/sudo /bin/bash'
 }
 
-main() {
-    eval "$(barnctl_parse_arguments root "h,help" -- "$@")"
-    barnctl_next_command "" "$@"
-}
-
-barnctl_command_version() {
+function barnctl_command_version {
     eval "$(barnctl_parse_arguments version "h,help" -- "$@")"
     print -R "$VERSION"
 }
 
-main "$@"
+
+function {
+    eval "$(barnctl_parse_arguments root "h,help" -- "$@")"
+    barnctl_next_command "" "$@"
+} "$@"
 
 exit
 
@@ -640,10 +639,10 @@ exit
 
 ___ barnctl_prepare ___
 barnyard_divider() {
-    local label=${1:-}
-    local bar=--------------------------------------------------------------------------------
+    typeset label=${1:-}
+    typeset bar=--------------------------------------------------------------------------------
     shift
-    local prefix="------- $label "
+    typeset prefix="------- $label "
     echo "$bar"
     echo "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
     echo "$bar"
@@ -693,8 +692,8 @@ source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barn
 
 shift
 
-main() {
-    declare -A o_barnyard=( o_force '0' ) o_module o_registers
+function {
+    typeset -A o_barnyard=( o_force '0' ) o_module o_registers
     typeset module=${3:-}
     o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[operation]=${5:-}
     shift 3
@@ -702,35 +701,40 @@ main() {
     o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
     barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
     source "${o_barnyard[barnyard]}/modules/$module/${o_barnyard[operation]}.zsh"
-}
-
-main "$@"
+} "$@"
 ___ barnctl_generate ___
-machine() {
-    local hostname=${1:-}
+function machine {
+    typeset hostname=${1:-}
     shift
+    typeset enabled=1
+    for argument in "$@"; do
+        [[ "$argument" = 'enabled=0' ]] && enabled=0
+    done
     o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
     __o_registers[excluded]=1
     if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
-        __o_registers[excluded]=0
         rm -rf "machines/${hostname}"
-        mkdir -p "machines/${hostname}"
+        if (( enabled )); then
+            __o_registers[excluded]=0
+            mkdir -p "machines/${hostname}"
+            @ machine "$@"
+        fi
     fi
 }
 
-@() {
+function @ {
     (( $__o_registers[excluded] )) && return
-    local module=${1:-}
+    typeset module=${1:-}
     shift
     [[ -z "$module" ]] && abend<<'    EOF'
         error: module name is required
     EOF
-    local regex='[a-z0-9_@]+'
+    typeset regex='[a-z0-9_@]+'
     [[ "${module:1}" =~ $regex ]] || abend<<'    EOF'
         error: invalid module name $module
     EOF
-    local filename key value
+    typeset filename key value
     filename="machines/${o_barnyard[hostname]}/$module"
     print -R "_order=$__o_registers[order]" > "$filename"
     while (( $# != 0 )); do
@@ -785,18 +789,14 @@ machine() {
     __o_registers[order]=$(( __o_registers[order] + 1 ))
 }
 
-main() {
+function {
     typeset -A o_barnyard __o_registers
     o_barnyard[include]=${1:-}
     o_barnyard[exclude]=${2:-}
     o_barnyard[configuration]=${3:-}
     shift 3
-    echo do
     source "$o_barnyard[configuration]"
-    echo done
-}
-
-main "$@"
+} "$@"
 ___
 ___ barnctl_inventory ___
 function @ {
@@ -804,23 +804,25 @@ function @ {
 }
 
 function machine {
-    local hostname=${1:-}
+    typeset hostname=${1:-}
     shift
-    if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
+    typeset enabled=1
+    for argument in "$@"; do
+        [[ "$argument" = 'enabled=0' ]] && enabled=0
+    done
+    if [[ $enabled -eq 1 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
         printf ' %q' "$hostname" "$@"
         printf '\n'
     fi
 }
 
-function main {
+function {
     typeset -A o_barnyard __o_registers
     o_barnyard[include]=${1:-}
     o_barnyard[exclude]=${2:-}
     o_barnyard[configuration]=${3:-}
     shift
     source "$o_barnyard[configuration]"
-}
-
-main "$@"
+} "$@"
 ___
