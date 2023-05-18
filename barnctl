@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.15.3
+VERSION=0.15.4
 
 SCRIPT_DIR=${${0:a}%/*}
 
@@ -715,9 +715,7 @@ function machine {
             __o_registers[excluded]=0
             rm -rf "machines/${hostname}"
             mkdir -p "machines/${hostname}"
-            print here "$@"
             @ machine "$@"
-            print there
         else
             rm -rf "age/${hostname}"
             rm -rf "machines/${hostname}"
@@ -781,7 +779,7 @@ function @ {
                         ;;
                     * )
                         abend <<'                        EOF'
-                            error: unknown module value $1"
+                            error: unknown module value: value: $1, module: $module, machine: $o_barnyard[hostname]
                         EOF
                         ;;
                 esac
