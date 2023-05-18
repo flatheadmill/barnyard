@@ -706,19 +706,22 @@ ___ barnctl_generate ___
 function machine {
     typeset hostname=${1:-}
     shift
-    typeset enabled=1
-    for argument in "$@"; do
-        [[ "$argument" = 'enabled=0' ]] && enabled=0
-    done
+    typeset enabled=$@[(Ie)enabled=0]
     o_barnyard[hostname]="$hostname"
     __o_registers[order]=0
     __o_registers[excluded]=1
     if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
-        rm -rf "machines/${hostname}"
         if (( enabled )); then
             __o_registers[excluded]=0
+            rm -rf "machines/${hostname}"
             mkdir -p "machines/${hostname}"
+            print here "$@"
             @ machine "$@"
+            print there
+        else
+            rm -rf "age/${hostname}"
+            rm -rf "machines/${hostname}"
+            rm -rf "resources/${hostname}"
         fi
     fi
 }
@@ -738,7 +741,7 @@ function @ {
     filename="machines/${o_barnyard[hostname]}/$module"
     print -R "_order=$__o_registers[order]" > "$filename"
     while (( $# != 0 )); do
-        if [[ -d "$1" ]]; then
+        if [[ -d "../code/$1" ]]; then
             print -R "_module=${1#modules/}" >> "$filename"
             shift
             continue
@@ -806,11 +809,8 @@ function @ {
 function machine {
     typeset hostname=${1:-}
     shift
-    typeset enabled=1
-    for argument in "$@"; do
-        [[ "$argument" = 'enabled=0' ]] && enabled=0
-    done
-    if [[ $enabled -eq 1 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
+    typeset enabled=$@[(Ie)enabled=0]
+    if [[ $enabled -ne 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
         printf '<machine>: '
         printf ' %q' "$hostname" "$@"
         printf '\n'
