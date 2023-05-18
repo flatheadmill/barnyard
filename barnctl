@@ -706,7 +706,7 @@ ___ barnctl_generate ___
 function machine {
     typeset hostname=${1:-}
     shift
-    typeset enabled=1
+    typeset argument enabled=1
     for argument in "$@"; do
         [[ "$argument" = 'enabled=0' ]] && enabled=0
     done
