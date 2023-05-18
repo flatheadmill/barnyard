@@ -779,7 +779,7 @@ function @ {
                         ;;
                     * )
                         abend <<'                        EOF'
-                            error: unknown module value $1"
+                            error: unknown module value: value: $1, module: $module, machine: $o_barnyard[hostname]
                         EOF
                         ;;
                 esac
