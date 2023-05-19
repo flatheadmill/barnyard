@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-VERSION=0.15.9
+VERSION=0.15.10
 
 SCRIPT_DIR=${${0:a}%/*}
 
