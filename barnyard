@@ -617,22 +617,13 @@ function barnyard_apply {
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
         if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
-            if [[ -e "/var/lib/barnyard/sha1/$o_barnyard[hostname]" ]]; then
-                o_barnyard[sha1]=$(<"/var/lib/barnyard/sha1/$o_barnyard[hostname]")
-            fi
-
             git -C "${o_barnyard[repository]}" fetch -q -p
-
-            typeset sha1 conf code
-            typeset -a current
-            if [[ -n "$o_barnyard[sha1]" ]]; then
-                o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} log -n 1 --format='%H' /remotes/origin/$o_barnyard[branch])
-            fi
+            o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} ls-remote origin refs/heads/$o_barnyard[branch] | awk '{ print $1 }')
 
             o_barnyard[archive]=$BARNYARD_TEMP/run
-            barnyard_extract /remotes/origin/$o_barnyard[branch] $BARNYARD_TEMP/run/conf
+            barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf
             o_barnyard[code]=$(<$BARNYARD_TEMP/run/conf/code)
-            barnyard_extract /remotes/origin/$o_barnyard[code] $BARNYARD_TEMP/run/code
+            barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
 
             if (( $# )); then
                 barnyard_run_ "$@"
