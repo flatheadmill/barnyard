@@ -532,7 +532,7 @@ function barnyard_run_ {
         *-diff )
             if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
                 read -r -A applied < "/var/lib/barnyard/applied/$module"
-                if [[ "$applied[1]" = "$barnyard[sha1]" ]]; then
+                if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
                     log module="$module" program="$program" "already applied module %s" "$module"
                     return
                 fi
@@ -626,13 +626,13 @@ function barnyard_apply {
             typeset sha1 conf code
             typeset -a current
             if [[ -n "$o_barnyard[sha1]" ]]; then
-                read -r -A current <<< "$(git -C ${o_barnyard[repository]} log -n 1 --format='%H %at' "$o_barnyard[sha1]")"
+                o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} log -n 1 --format='%H' /remotes/origin/$o_barnyard[branch])
             fi
 
             o_barnyard[archive]=$BARNYARD_TEMP/run
-            barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf
+            barnyard_extract /remotes/origin/$o_barnyard[branch] $BARNYARD_TEMP/run/conf
             o_barnyard[code]=$(<$BARNYARD_TEMP/run/conf/code)
-            barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
+            barnyard_extract /remotes/origin/$o_barnyard[code] $BARNYARD_TEMP/run/code
 
             if (( $# )); then
                 barnyard_run_ "$@"
