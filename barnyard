@@ -743,7 +743,7 @@ function command_barnyard_systemd_apply {
     barnyard_version_check
     typeset -a dry_run
     (( $o_dry_run )) && dry_run+=( '--dry-run' )
-    barnyard_systemd apply --dry-run "${(@)dry_run}" "$@"
+    barnyard_systemd apply "${(@)dry_run}" "$@"
 }
 
 function command_barnyard_systemd {
