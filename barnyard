@@ -552,6 +552,8 @@ function barnyard_run_ {
             ;;
     esac
 
+    (( barnyard[dry_run] )) && return
+
     barnyard[module]="$module"
     export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
     export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
@@ -662,9 +664,9 @@ function command_barnyard_always {
 
 function command_barnyard_apply {
     typeset o_repository=/var/lib/barnyard/repository
-    eval "$(barnyard_parse_arguments apply o_repository=b,barnyard: v,version: q,quiet h,help -- "$@")"
+    eval "$(barnyard_parse_arguments apply d,dry-run o_repository=b,barnyard: v,version: q,quiet h,help -- "$@")"
     (( $# )) && abend 'barnyard apply takes no positional arguments'
-    typeset -A o_barnyard=( always no repository "$(readlink -f "$o_repository")" )
+    typeset -A o_barnyard=( always no repository "$(readlink -f "$o_repository")" dry_run $o_dry_run )
     barnyard_apply "$@"
 }
 
