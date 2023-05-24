@@ -389,7 +389,7 @@ function barnctl_command_systemd_always {
 }
 
 function barnctl_command_systemd_apply {
-    eval "$(barnctl_parse_arguments systemd_apply "h,help" -- "$@")"
+    eval "$(barnctl_parse_arguments systemd_apply "d,dry-run" "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
@@ -398,7 +398,7 @@ function barnctl_command_systemd_apply {
     typeset server=${1:-}
     shift
 
-    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd apply --version $VERSION"
+    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd apply --dry-run "$o_dry_run" --version $VERSION"
 }
 
 function barnctl_command_systemd {
@@ -420,7 +420,7 @@ function barnctl_command_always {
 }
 
 function barnctl_command_apply {
-    eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
+    eval "$(barnctl_parse_arguments apply "d,dry-run" "h,help" -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
@@ -428,7 +428,7 @@ function barnctl_command_apply {
 
     typeset server=${1:-}
 
-    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard apply --version $VERSION"
+    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard apply --dry-run $o_dry_run --version $VERSION"
 }
 
 # For when you forget the SSH protocol. SSH will invoke a shell with the `-c`
