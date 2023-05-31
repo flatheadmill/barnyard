@@ -528,6 +528,7 @@ function barnyard_run_ {
                 log module="$module" program="$program" "already applied module %s" "$module"
                 return
             fi
+            log module="$module" program="$program" "module %s not yet applied, applying" "$module"
             ;;
         *-diff )
             if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
