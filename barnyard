@@ -545,6 +545,8 @@ function barnyard_run_ {
                     return
                 fi
                 log module="$module" program="$program" "module %s has changed, re-applying" "$module"
+            else
+                log module="$module" program="$program" "module %s not yet applied, applying" "$module"
             fi
             ;;
         *-never )
