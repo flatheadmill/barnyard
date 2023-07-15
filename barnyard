@@ -556,10 +556,11 @@ function barnyard_run_ {
     (( barnyard[dry_run] )) && return
 
     barnyard[module]="$module"
+    barnyard[source]="${barnyard[archive]}/code/modules/$o_module[_module]/$program"
     export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
     export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
     barnyard_string_resource barnyard_apply > "$BARNYARD_TEMP/apply"
-    zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/code/modules/$o_module[_module]/$program" "${args[@]}"
+    zsh "$BARNYARD_TEMP/apply" "${args[@]}"
     code=$?
     (( $code )) && log err code=$code module="$module" 'module %s exited %d' "$module" $code && return $code
 
@@ -957,5 +958,5 @@ function barnyard_always {
 
 cd "$o_barnyard[archive]"
 
-source "$1"
+source "$o_barnyard[source]"
 ___
