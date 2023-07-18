@@ -391,64 +391,114 @@ function abend {
     exit 1
 }
 
-function log {
-    SALT=a5bbeb04f50fcdee70b0b5976438a8d8
+# Appears as though the last time I visted this, I'd given up on the notion of
+# logging each line to systemd with an appropriate PRIORITY since we are going
+# to run under systemd and our standard out and standard err are going to go to
+# systemd-journal anyway, so we would end up having two forms of logging,
+# whatever is coming out of standard I/O and whatever we are explicitly logging
+# with the systemd-journal.
 
+# We see now that Loki has a parser for the logfmt logging format which is
+# probably our best bet for getting the logging level. We can set alerts on a
+# query winnowed on the purpose of a virtual machine to look for log entries
+# that match a particular systemd unit and then parse for the log level. Should
+# be performant since we'll use purpose and unit as indicies.
+
+# Difficult to determine how to do structure with logs and the degree to which
+# you should label logs with systemd-journal when everything is supposed to be
+# shipped off to a different index. At some point I was attempting to get the
+# most out of systemd-journal by creating unique message ids. That's got to come
+# in handy some day, right? The ability to track a message over time as its line
+# number changes, that's useful, right?
+
+# No. Doesn't seem to be the way things work. Really just want to see what's
+# happening in our log database with cursory pattern matching. Not trying to
+# construct a UML diagram of my Zsh scripts.
+
+# Arguments are an optional syslog priority, followed by optional key value
+# pairs followed by a printf statement.
+
+# log <level> <name=value> <format> <format-args>
+function log {
+    typeset -a fields
     typeset priority level
-    if [[ -z "${PRIORITY[$1]-}" ]]; then
+
+    # The first argument
+    if [[ -z "${PRIORITY[$1]:-}" ]]; then
         priority=info
     else
-        priority="$1"
+        priority=$1
         shift
     fi
 
+    # Create a template message. We do want level, module and message first
+    # since that would probably be easiest to read in console spew.
+    typeset message_index
+    if (( ${+o_barnyard[module]} )); then
+        typeset -a fields=( "level=$priority" module=${o_barnyard[module]:-} msg= )
+        message_index=3
+    else
+        typeset -a fields=( "level=$priority" msg= )
+        message_index=2
+    fi
 
-    typeset -a journald syslog
-    typeset name value regex='^([^=]+)=(.*)$'
-    while true; do
-        if [[ "$1" =~ $regex ]]; then
-            name="${match[1]}" value="${match[2]}"
-            journald+=("${name:u}=${value}")
-            syslog+=("${name}=${value}")
-            if [[ "$name" == priority ]]; then
-                priority=$value
-            fi
-            shift
-        else
-            break
+    # Escape the values of the key value pair. This will stop at the first
+    # argument that does not have an equal sign. You can use `--` to address
+    # ambiguities.
+    typeset name value
+    while [[ ${1:-} =~ ([^=]+)=(.*) ]]; do
+        shift
+        name=${match[1]}
+        value=${match[2]}
+        value=${value//\\/\\\\}
+        value=${value//\"/\\\"}
+        if [[ "$value" =~ [\ \\] ]]; then
+            value="\"$value\""
         fi
+        case "$name" in
+            level | msg | module )
+                ;;
+            * )
+                fields+=( "$name=$value" )
+                ;;
+        esac
     done
 
-    if [[ -n "${o_barnyard[module]}" ]]; then
-        journald+=("MODULE=${o_barnyard[module]}")
-        syslog+=("module=${o_barnyard[module]}")
+    # You can use `--` to indicate an end of key value pairs. This would allow
+    # for a log line that formats out to `msg=info` using `-- info` as well as
+    # allow for a message that has an equal sign in it.
+    if [[ ${1:-} == '--' ]]; then
+        shift
     fi
 
-    level=$PRIORITY[$priority]
-
-    if (set +u; [[ "$priority" -gt "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]]); then
+    # Check if the message is at our logging level.
+    if (( $PRIORITY[$priority] > $PRIORITY[$BARNYARD_LOG_LEVEL] )); then
         return
     fi
 
-    typeset format="$1" message
-    shift
-    message=$(printf "$format\n" "$@")
-
-    typeset context=''
-    if [[ ${#syslog[@]} -ne 0 ]]; then
-        context="; ${(j:, :)syslog}"
+    # Resist the urge to DRY here, it is an intentional loop unroll to repeat
+    # the escaping of the message instead of first creating an array of key
+    # value pairs including the message and then escape all the pairs.
+    if (( $# )); then
+        typeset format="$1" message
+        shift
+        printf -v message "$format" "$@"
+        message=${message//\\/\\\\}
+        message=${message//\"/\\\"}
+        if [[ "$message" =~ [\ \\] ]]; then
+            message="\"$message\""
+        fi
+        fields[$message_index]="msg=$message"
     fi
 
+    # When we see this environment variable, it indicates that we are running
+    # inside systemd and we do not have to add date context, but I can't
+    # remember if it is something we set, or if it something that systemd sets.
+    # If it was oures, it would probably be prefixed with `BARNYARD_`.
     if [[ -v INVOCATION_ID ]]; then
-        printf '<%s> %s%s\n' $priority $message $context
-        return
-        typeset id
-        id=$(print -R "$SALT" "$format" | md5sum | cut -d' ' -f1)
-
-        journald+=("MESSAGE_ID=$id" "MESSAGE=$message$context" PRIORITY=$level SYSLOG_FACILITY=1 SYSLOG_IDENTIFIER=barnyard)
-        print "${(j:\n:)journald}" | logger --journald
+        printf '%s\n' "${(j: :)fields}"
     else
-        printf "$(date --rfc-3339=s | sed 's/+.*//') barnyard[$priority]: $message$context\n"
+        printf '%s barnyard[%s]: %s\n' "$(date --rfc-3339=s | sed 's/+.*//')" $priority "${(j: :)${(@)fields:1}}"
     fi
 }
 
@@ -558,10 +608,11 @@ function barnyard_run_ {
     (( barnyard[dry_run] )) && return
 
     barnyard[module]="$module"
+    barnyard[source]="${barnyard[archive]}/code/modules/$o_module[_module]/$program"
     export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
     export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
     barnyard_string_resource barnyard_apply > "$BARNYARD_TEMP/apply"
-    zsh "$BARNYARD_TEMP/apply" "${barnyard[archive]}/code/modules/$o_module[_module]/$program" "${args[@]}"
+    zsh "$BARNYARD_TEMP/apply" "${args[@]}"
     code=$?
     (( $code )) && log err code=$code module="$module" 'module %s exited %d' "$module" $code && return $code
 
@@ -732,6 +783,7 @@ function barnyard_systemd {
     )
 
     # If it was an error message, return the error exit code.
+    # TODO `return` is unnecessary, isn't it?
     [[ $outcome[MESSAGE_ID] = 98e322203f7a4ed290d09fe03c09fe15 ]] && return $outcome[EXIT_STATUS]
 }
 
@@ -959,5 +1011,5 @@ function barnyard_always {
 
 cd "$o_barnyard[archive]"
 
-source "$1"
+source "$o_barnyard[source]"
 ___
