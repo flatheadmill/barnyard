@@ -727,7 +727,7 @@ function command_barnyard_apply {
 function barnyard_systemd {
     # We're going to only be interested in log entries emitted after we start
     # our unit, so we capture the journal cursor now.
-    [[ "$(journalctl -q -e -n 1 -o verbose --output-fields '')" =~ ^.*\\[(.*)\\]$ ]]
+    [[ "$(journalctl -q -e -n 1 -o verbose)" =~ ^.*\\[(.*)\\] ]]
     typeset cursor=$match[1]
 
     # Tail the barnyard logs from this point if we successfully start the unit.
