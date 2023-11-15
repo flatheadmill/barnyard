@@ -639,7 +639,6 @@ function barnyard_order_modules {
     typeset -a unordered ordered
     typeset configuration operation module program
 
-    cat "$o_barnyard[archive]/conf/machines/$o_barnyard[hostname]/order"
     barnyard_read_config o_order "$o_barnyard[archive]/conf/machines/$o_barnyard[hostname]/order"
     barnyard_get_array o_order module ordered
 
