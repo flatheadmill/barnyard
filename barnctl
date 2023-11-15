@@ -725,6 +725,7 @@ function machine {
             __o_registers[excluded]=0
             rm -rf "machines/${hostname}"
             mkdir -p "machines/${hostname}"
+            printf '_apply=never\n' > "machines/${hostname}/order"
             @ machine "$@"
         fi
     fi
@@ -743,7 +744,9 @@ function @ {
     EOF
     typeset filename key value
     filename="machines/${o_barnyard[hostname]}/$module"
-    print -R "_order=$__o_registers[order]" > "$filename"
+    # print -R "_order=$__o_registers[order]" > "$filename"
+    touch "$filename"
+    printf 'module+=%s\n' "$module" >> "machines/${o_barnyard[hostname]}/order"
     while (( $# != 0 )); do
         if [[ -d "../code/$1" ]]; then
             print -R "_module=${1#modules/}" >> "$filename"
