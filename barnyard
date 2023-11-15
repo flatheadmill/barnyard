@@ -326,7 +326,7 @@ function barnyard_write_config {
 }
 
 function barnyard_get_array {
-    [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@Q)${(@z)${(P)1}[$2]}}}
+    [[ -n "${${(P)1}[$2]}" ]] && : ${(PA)3::=${(@QA)${(@z)${(P)1}[$2]}}}
 }
 
 function barnyard_get_array_redux {
@@ -635,28 +635,17 @@ function barnyard_version_check {
 
 function barnyard_order_modules {
     mkdir -p "/var/lib/barnyard/sha1"
-    typeset -A ordered o_module o_program
-    typeset -a unordered
+    typeset -A ordered o_module o_program o_order
+    typeset -a unordered ordered
     typeset configuration operation module program
-    for module in "$@"; do
-        configuration="machines/$o_barnyard[hostname]/$module"
-        [[ -e "$o_barnyard[archive]/conf/$configuration" ]] || abend 'no configuration for module %s' "$module"
-        o_module=()
-        barnyard_read_config o_module "$o_barnyard[archive]/conf/$configuration" _apply once
-        if [[ "$o_module[_order]" ]]; then
-            ordered[$module]="$o_module[_order]"
-        else
-            unordered+=("$module")
-        fi
-    done
 
-    typeset -a in_order
-    in_order=(${(f)"$(sort -k1n,2 <(for module order in "${(@kv)ordered}"; do echo "$order $module"; done) | cut -d' ' -f2)"})
-    in_order+=("${unordered[@]}")
+    cat "$o_barnyard[archive]/conf/machines/$o_barnyard[hostname]/order"
+    barnyard_read_config o_order "$o_barnyard[archive]/conf/machines/$o_barnyard[hostname]/order"
+    barnyard_get_array o_order module ordered
 
-    log info modules="${(j: :)in_order[@]}" 'running modules in order' "${(j: :)in_order[@]}"
+    log info modules="${(j: :)ordered[@]}" 'running modules in order'
 
-    for module in "${(@)in_order}"; do
+    for module in "${(@)ordered}"; do
         barnyard_run_ "$module" || return 1
     done
 }
