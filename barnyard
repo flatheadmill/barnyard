@@ -420,8 +420,8 @@ function abend {
 
 # log <level> <name=value> <format> <format-args>
 function log {
-    typeset -a fields
-    typeset priority level
+    typeset priority level ordered=() order=( level )
+    typeset -A fields
 
     # The first argument
     if [[ -z "${PRIORITY[$1]:-}" ]]; then
@@ -435,11 +435,9 @@ function log {
     # since that would probably be easiest to read in console spew.
     typeset message_index
     if (( ${+o_barnyard[module]} )); then
-        typeset -a fields=( "level=$priority" module=${o_barnyard[module]:-} msg= )
-        message_index=3
+        fields=( level $priority module "${o_barnyard[module]:-}" )
     else
-        typeset -a fields=( "level=$priority" msg= )
-        message_index=2
+        fields=( level $priority )
     fi
 
     # Escape the values of the key value pair. This will stop at the first
@@ -455,13 +453,8 @@ function log {
         if [[ "$value" =~ [\ \\] ]]; then
             value="\"$value\""
         fi
-        case "$name" in
-            level | msg | module )
-                ;;
-            * )
-                fields+=( "$name=$value" )
-                ;;
-        esac
+        order+=( $name )
+        fields[$name]="$value"
     done
 
     # You can use `--` to indicate an end of key value pairs. This would allow
@@ -488,17 +481,24 @@ function log {
         if [[ "$message" =~ [\ \\] ]]; then
             message="\"$message\""
         fi
-        fields[$message_index]="msg=$message"
+        order+=( msg )
+        fields[msg]=$message
     fi
+
+    for name in "${(@kv)order}"; do
+        (( ${+fields[$name]} )) || continue
+        ordered+=( "$name=$fields[$name]" )
+        unset "fields[$name]"
+    done
 
     # When we see this environment variable, it indicates that we are running
     # inside systemd and we do not have to add date context, but I can't
     # remember if it is something we set, or if it something that systemd sets.
     # If it was oures, it would probably be prefixed with `BARNYARD_`.
     if [[ -v INVOCATION_ID ]]; then
-        printf '%s\n' "${(j: :)fields}"
+        printf '%s\n' "${(j: :)ordered}"
     else
-        printf '%s barnyard[%s]: %s\n' "$(date --rfc-3339=s | sed 's/+.*//')" $priority "${(j: :)${(@)fields:1}}"
+        printf '%s barnyard[%s]: %s\n' "$(date --rfc-3339=s | sed 's/+.*//')" $priority "${(j: :)${(@)ordered:1}}"
     fi
 }
 
@@ -569,38 +569,40 @@ function barnyard_run_ {
     applied=()
     diffs=()
 
+    [[ -e "/var/lib/barnyard/applied/$module" ]]
+    typeset ran=$(( ! $? ))
     case "$o_barnyard[always]-$o_module[_apply]" in
         yes-* | *-always )
-            log module="$module" program="$program" 'module %s run set to always, applying' "$module"
+            log run=1 ran=$ran module="$module" program="$program" apply=always msg= 'check dirty'
             ;;
         *-once )
-            if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
-                log module="$module" program="$program" "already applied module %s" "$module"
+            if (( $ran )); then
+                log run=0 ran=1 module="$module" program="$program" apply=once msg= 'check dirty'
                 return
             fi
-            log module="$module" program="$program" "module %s not yet applied, applying" "$module"
+            log run=1 ran=0 module="$module" program="$program" apply=once msg= 'check dirty'
             ;;
         *-diff )
-            if [[ -e "/var/lib/barnyard/applied/$module" ]]; then
+            if (( $ran )); then
                 read -r -A applied < "/var/lib/barnyard/applied/$module"
                 if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
-                    log module="$module" program="$program" "already applied module %s" "$module"
+                    log run=0 ran=1 module="$module" program="$program" apply=diff msg= 'check dirty'
                     return
                 fi
                 barnyard_get_array o_module _diff diffs
                 diffs+=("machines/$barnyard[hostname]/$module")
                 git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"
                 if git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
-                    log module="$module" program="$program" "module %s has not changed, skipping" "$module"
+                    log run=0 ran=1 module="$module" program="$program" apply=diff msg= 'check dirty'
                     return
                 fi
-                log module="$module" program="$program" "module %s has changed, re-applying" "$module"
+                log run=1 ran=1 module="$module" program="$program" apply=diff msg= 'check dirty'
             else
-                log module="$module" program="$program" "module %s not yet applied, applying" "$module"
+                log run=1 ran=0 module="$module" program="$program" apply=diff msg= 'check dirty'
             fi
             ;;
         *-never )
-            log module="$module" program="$program" "module % run set to never, skipping" "$module"
+            log run=0 ran=$ran module="$module" program="$program" apply=diff msg= 'check dirty'
             return
             ;;
     esac
@@ -654,14 +656,22 @@ function barnyard_apply {
     {
         barnyard_version_check
 
-
         [[ -e /etc/barnyard/config ]] || abend 'barnyard not installed'
         barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet $o_quiet "${(@kv)o_barnyard}"
+
+        [[ -v o_ref ]] && o_barnyard[branch]=$o_ref
 
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
         if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
-            git -C "${o_barnyard[repository]}" fetch -q -p
+            if ! git -C "${o_barnyard[repository]}" config --get --bool remote.origin.mirror > /dev/null; then
+                remote=$(git -C "${o_barnyard[repository]}" config --get remote.origin.url)
+                rm -rf /var/lib/barnyard/repository
+                git clone --mirror "$remote" /var/lib/barnyard/repository
+            fi
+
+            git remote update --prune > /dev/null || abend 'fatal: cannot update remote'
+
             o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} ls-remote origin refs/heads/$o_barnyard[branch] | awk '{ print $1 }')
 
             o_barnyard[archive]=$BARNYARD_TEMP/run
@@ -693,7 +703,7 @@ function barnyard_apply {
             barnyard_run_ "$@"
         fi
     } always {
-        rm -rf "$BARNYARD_TEMP"
+        [[ -n "$BARNYARD_TEMP" && -d "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
     }
 }
 
@@ -706,7 +716,8 @@ function command_barnyard_always {
 
 function command_barnyard_apply {
     typeset o_repository=/var/lib/barnyard/repository
-    eval "$(barnyard_parse_arguments apply d,dry-run o_repository=b,barnyard: v,version: q,quiet h,help -- "$@")"
+    eval "$(barnyard_parse_arguments apply d,dry-run o_repository=b,barnyard: r,ref: v,version: q,quiet h,help -- "$@")"
+    [[ -v o_ref && $o_dry_run = 0 ]] && abend 'cannot specify ref except for dry-run'
     (( $# )) && abend 'barnyard apply takes no positional arguments'
     typeset -A o_barnyard=( always no repository "$(readlink -f "$o_repository")" dry_run $o_dry_run )
     barnyard_apply "$@"
@@ -812,16 +823,9 @@ function command_barnyard_clone {
 
     rm -rf /var/lib/barnyard/repository
 
-    git clone -q "${repository%#*}" /var/lib/barnyard/repository || abend 'unable to clone repository %s' "$repository"
+    git clone -q --mirror "${repository%#*}" /var/lib/barnyard/repository || abend 'unable to clone repository %s' "$repository"
 
-    typeset branch="${repository##*#}"
-    if [[ -z "$branch" ]]; then
-        branch=$(git rev-parse --abbrev-ref HEAD) || abend 'unable to determin branch for %s' "$repository"
-    else
-        git -C /var/lib/barnyard/repository checkout  "$branch" || abend 'unable to checkout branch %s' "$branch"
-    fi
-
-    print -R "branch=$branch" > /etc/barnyard/config
+    printf 'branch=$s\n' "$branch" > /etc/barnyard/config
 }
 
 function command_barnyard_commit {
