@@ -670,7 +670,7 @@ function barnyard_apply {
                 git clone --mirror "$remote" /var/lib/barnyard/repository
             fi
 
-            git remote update --prune > /dev/null || abend 'fatal: cannot update remote'
+            git -C "$o_barnyard[repository]" remote update --prune || abend 'fatal: cannot update remote'
 
             o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} ls-remote origin refs/heads/$o_barnyard[branch] | awk '{ print $1 }')
 
