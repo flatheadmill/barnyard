@@ -342,7 +342,7 @@ function barnyard_extract {
     typeset branch=${1:-} destination=${2:-} seen=${3:-}
     typeset sha1=$(git -C "${o_barnyard[repository]}" ls-remote origin "refs/heads/$branch" | awk '{ print $1 }')
     while read -r sha1 good; do
-        if [[ $good = G ]]; then
+        if [[ -n "$o_ref" || $good = G ]]; then
             mkdir -p $destination
             git -C "$o_barnyard[repository]" archive $sha1 | tar -C "$destination" -x
             return
