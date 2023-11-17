@@ -385,7 +385,7 @@ function barnctl_command_systemd_always {
     typeset server=${1:-}
     shift
 
-    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd always --version $VERSION ${(j: :)${(@)@:q}}"
+    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd always --version $VERSION ${(j: :)${(@)@:q}}"
 }
 
 function barnctl_command_systemd_apply {
@@ -401,7 +401,7 @@ function barnctl_command_systemd_apply {
     typeset server=${1:-}
     shift
 
-    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd apply $dry_run --version $VERSION"
+    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" "/usr/bin/sudo /usr/local/bin/barnyard systemd apply $dry_run --version $VERSION"
 }
 
 function barnctl_command_systemd {
@@ -419,7 +419,7 @@ function barnctl_command_always {
     typeset server=${1:-}
     shift
 
-    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard always --version $VERSION ${(j: :)${(@)@:q}}"
+    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" "/usr/bin/sudo /usr/local/bin/barnyard always --version $VERSION ${(j: :)${(@)@:q}}"
 }
 
 function barnctl_command_apply {
@@ -434,7 +434,7 @@ function barnctl_command_apply {
 
     typeset server=${1:-}
 
-    ssh "$server" "/usr/bin/sudo /usr/local/bin/barnyard apply $dry_run --version $VERSION"
+    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" "/usr/bin/sudo /usr/local/bin/barnyard apply $dry_run --version $VERSION"
 }
 
 # For when you forget the SSH protocol. SSH will invoke a shell with the `-c`
@@ -484,7 +484,7 @@ function barnctl_command_bootstrap {
         if [[ -v o_clone ]]; then
             printf 'barnyard clone --version=%q %q || exit 1\n' $VERSION "$o_clone"
         fi
-    } | ssh "$server" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
 
 function assert_barnyard_directory {
@@ -504,7 +504,7 @@ function barnctl_command_commit {
 
     typeset server=${1:-}
 
-    ssh "$server" "/usr/local/bin/barnyard commit --version $VERSION"
+    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" "/usr/local/bin/barnyard commit --version $VERSION"
 }
 
 function configure_or_unconfigure {
@@ -602,7 +602,7 @@ function barnctl_command_prepare {
         print -R ')'
         print -R ''
         barnctl_shell_resource barnctl_prepare
-    } | ssh "$server" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
 
 function barnctl_command_upgrade {
@@ -623,7 +623,7 @@ function barnctl_command_upgrade {
         print -R 'VERSION='$VERSION
         print -R ''
         barnctl_shell_resource barnctl_upgrade
-    } | ssh "$server" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
 
 function barnctl_command_version {
