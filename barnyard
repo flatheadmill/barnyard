@@ -825,7 +825,7 @@ function command_barnyard_clone {
 
     git clone -q --mirror "${repository%#*}" /var/lib/barnyard/repository || abend 'unable to clone repository %s' "$repository"
 
-    printf 'branch=$s\n' "$branch" > /etc/barnyard/config
+    printf 'branch=%s\n' "$branch" > /etc/barnyard/config
 }
 
 function command_barnyard_commit {
