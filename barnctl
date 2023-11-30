@@ -463,6 +463,7 @@ function barnctl_command_bootstrap {
     # can add just one.
 
     {
+        print 'set -e'
         if [[ -v o_known ]]; then
             slurp=$(cat "$o_known")
             printf 'cat <<EOF | barnyard ssh known-hosts --version=%q - || exit 1\n' $VERSION
@@ -596,6 +597,7 @@ function barnctl_command_prepare {
     typeset server=${1:-}
 
     {
+        print -R 'set -e'
         print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
         sed 's/VERSION=.*/VERSION='$VERSION'/' "${SCRIPT_DIR}/barnyard"
         print -R 'EOS'
@@ -615,6 +617,7 @@ function barnctl_command_upgrade {
     typeset server=${1:-}
 
     {
+        print -R 'set -e'
         print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOF"'"
         sed 's/VERSION=.*/VERSION='$VERSION'/' "${SCRIPT_DIR}/barnyard"
         print -R 'EOF'
