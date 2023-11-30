@@ -340,7 +340,8 @@ function barnyard_get_array_redux {
 
 function barnyard_extract {
     typeset branch=${1:-} destination=${2:-} seen=${3:-}
-    typeset sha1=$(git -C "${o_barnyard[repository]}" ls-remote origin "refs/heads/$branch" | awk '{ print $1 }')
+    typeset sha1=$(git -C "${o_barnyard[repository]}" rev-parse "$branch")
+    #typeset sha1=$(git -C "${o_barnyard[repository]}" ls-remote origin "refs/heads/$branch" | awk '{ print $1 }')
     while read -r sha1 good; do
         if [[ -n "$o_ref" || $good = G ]]; then
             mkdir -p $destination
@@ -670,9 +671,11 @@ function barnyard_apply {
                 git clone --mirror "$remote" /var/lib/barnyard/repository
             fi
 
-            git -C "$o_barnyard[repository]" remote update --prune || abend 'fatal: cannot update remote'
+            if (( $o_barnyard[fetch] ));then
+                git -C "$o_barnyard[repository]" remote update --prune || abend 'fatal: cannot update remote'
+            fi
 
-            o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} ls-remote origin refs/heads/$o_barnyard[branch] | awk '{ print $1 }')
+            o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} rev-parse $o_barnyard[branch])
 
             o_barnyard[archive]=$BARNYARD_TEMP/run
             barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf
@@ -709,8 +712,8 @@ function barnyard_apply {
 
 function command_barnyard_always {
     typeset o_repository=/var/lib/barnyard/repository
-    eval "$(barnyard_parse_arguments always v,version: o_repository=b,barnyard: q,quiet h,help -- "$@")"
-    typeset -A o_barnyard=( always yes repository "$(readlink -f "$o_repository")" )
+    eval "$(barnyard_parse_arguments always f,fetch v,version: o_repository=b,barnyard: q,quiet h,help -- "$@")"
+    typeset -A o_barnyard=( always yes repository "$(readlink -f "$o_repository")" fetch $o_fetch )
     barnyard_apply "$@"
 }
 
@@ -719,7 +722,7 @@ function command_barnyard_apply {
     eval "$(barnyard_parse_arguments apply d,dry-run o_repository=b,barnyard: r,ref: v,version: q,quiet h,help -- "$@")"
     [[ -v o_ref && $o_dry_run = 0 ]] && abend 'cannot specify ref except for dry-run'
     (( $# )) && abend 'barnyard apply takes no positional arguments'
-    typeset -A o_barnyard=( always no repository "$(readlink -f "$o_repository")" dry_run $o_dry_run )
+    typeset -A o_barnyard=( always no repository "$(readlink -f "$o_repository")" dry_run $o_dry_run fetch 1 )
     barnyard_apply "$@"
 }
 
