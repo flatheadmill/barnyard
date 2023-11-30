@@ -522,23 +522,41 @@ function barnyard_divider {
     print -R "$bar"
 }
 
-function barnyard_quotedoc {
-    typeset heredoc spaces=65536 leading='^( *)([^[:space:]])' IFS='' dedented
-    typeset -a lines
-    while read -r line; do
-        lines+=("$line")
-        if [[ "$line" =~ $leading ]]; then
-            if [[ "${#match[1]}" -lt "$spaces" ]]; then
+function barnyard_heredoc {
+    typeset __barnyard_heredoc__chomped__=()
+    if (( $# )); then
+        __barnyard_heredoc__chomped__+=( -v "$1" )
+    fi
+    __barnyard_heredoc__chomped__+=( '%s' )
+    function {
+        typeset spaces=65536 leading='^( *)([^[:space:]])' IFS='' line lines=() chomped=()
+        while read -r line; do
+            lines+=( "$line" )
+            if [[ "$line" =~ $leading && "${#match[1]}" -lt "$spaces" ]]; then
                 spaces="${#match[1]}"
             fi
-        fi
-    done < /dev/stdin
-    read -r -d '' dedented < <(printf "%s\n" "${lines[@]}" | sed -E 's/^ {'$spaces'}//')
-    eval "$({
-        print -R "cat <<EOF"
-        print -R -n "$dedented"
-        print -R "EOF"
-    })"
+        done
+        for line in "${(@)lines}"; do
+            chomped+=( "${line[spaces + 1,-1]}" )
+        done
+        __barnyard_heredoc__chomped__+=( "${(pj:\n:)chomped}" )
+    }
+    printf "${(@)__barnyard_heredoc__chomped__}"
+}
+
+function barnyard_quotedoc {
+    if (( $# )); then
+        IFS= read -rd '' "$1" < <(barnyard_quotedoc)
+        : ${(P)1::=${${(P)1}%[[:space:]]}}
+    else
+        typeset heredoc
+        barnyard_heredoc heredoc
+        eval "$({
+            print 'cat <<EOF'
+            printf '%s\n' "$heredoc"
+            print EOF
+        })"
+    fi
 }
 
 function barnyard_run_ {
