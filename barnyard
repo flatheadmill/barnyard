@@ -713,7 +713,7 @@ function barnyard_apply {
             [[ -d "$o_barnyard[repository]" ]] || abend 'no barnyard at path %s' "${o_barnyard[repository]:q}"
 
             typeset barnyard_user
-            barnyard_user=$(stat -c '%U' "${o_barnyard[repository]}/conf/.git/index") || abend 'not a git repo %s' "$o_barnyard[repository]"
+            barnyard_user=$(stat -c '%U' "$(git -C "${o_barnyard[repository]}/conf" rev-parse --git-dir)/index") || abend 'not a git repo %s' "$o_barnyard[repository]/conf"
 
             [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[repository]:q}"
 
