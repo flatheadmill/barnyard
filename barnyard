@@ -703,7 +703,7 @@ function barnyard_apply {
             if (( $# )); then
                 barnyard_run_ "$@"
             else
-                [[ "$always" = no ]] || abend 'always requires specific modules to run'
+                [[ "$always" = yes ]] || abend 'always requires specific modules to run'
                 typeset -a modules
                 modules=("${(@f)$(ls "${o_barnyard[archive]}/conf/machines/${o_barnyard[hostname]}")}")
                 barnyard_order_modules "${modules[@]}"
