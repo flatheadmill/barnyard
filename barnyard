@@ -701,6 +701,7 @@ function barnyard_apply {
             barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
 
             if (( $# )); then
+                [[ "$always" = no ]] || abend 'always requires specific modules to run'
                 barnyard_run_ "$@"
             else
                 typeset -a modules
