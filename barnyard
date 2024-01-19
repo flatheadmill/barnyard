@@ -878,14 +878,17 @@ function command_barnyard_gpg_import {
     fi
     gpg_key=$(< "$filename") || abend 'unable to read gpg key'
 
-    typeset fingerprint=$( \
-        print -R "$gpg_key" | \
-            gpg --with-colons --import-options show-only --import --fingerprint 2>/dev/null | \
-            awk -F: '/^fpr/ { print $10; exit }' \
-    )
+    gpg --import <(printf '%s' "$gpg_key") > /dev/null 2>&1 || abend 'unable to import key'
 
-    gpg --import <(print -R "$gpg_key") > /dev/null 2>&1 || abend 'unable to import key'
-    gpg --batch --yes --sign-key "$fingerprint" > /dev/null 2>&1 || abend 'unable to sign key'
+    typeset fingerprint
+    for fingerprint in "${(f)$(
+        printf '%s' "$gpg_key" | \
+            gpg --with-colons --import-options show-only --import --fingerprint 2>/dev/null | \
+            awk -F: '/^fpr/ { print $10 }'
+    )}"; do
+        gpg --batch --yes --sign-key "$fingerprint" > /dev/null 2>&1 || abend 'unable to sign key'
+    done
+
     gpg --list-keys
 }
 
