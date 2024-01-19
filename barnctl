@@ -447,14 +447,14 @@ function barnctl_command_apply {
 # of the scripts here.
 
 function barnctl_command_bootstrap {
-    typeset -a o_gpg
-    eval "$(barnctl_parse_arguments bootstrap h,help g,gpg@ k,known: s,ssh: c,clone: -- "$@")"
+    typeset -a o_gpg o_fingerprint
+    eval "$(barnctl_parse_arguments bootstrap h,help g,gpg@ f,fingerprint@ k,known: s,ssh: c,clone: -- "$@")"
 
     (( $# )) || abend<<'    EOF'
         erorr: ssh hostname is required
     EOF
 
-    typeset server=${1:-} slurp
+    typeset server=${1:-} slurp gpg fingerprint
 
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
@@ -476,14 +476,20 @@ function barnctl_command_bootstrap {
             printf '%s\n' "$slurp"
             print EOF
         fi
-        for gpg in "${o_gpg[@]}"; do
+        for gpg in "${(@)o_gpg}"; do
             slurp=$(cat "$gpg")
             printf 'cat <<EOF | barnyard gpg import --version=%q - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         done
+        for fingerprint in "${(@)o_fingerprint}"; do
+            printf 'barnyard gpg trust --version=%q %q || exit 1\n' $VERSION "$fingerprint"
+        done
         if [[ -v o_clone ]]; then
             printf 'barnyard clone --version=%q %q || exit 1\n' $VERSION "$o_clone"
+        fi
+        if (( ${#o_gpg} || ${#o_fingerprint} )); then
+            printf 'GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys\n'
         fi
     } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
