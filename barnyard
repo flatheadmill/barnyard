@@ -680,6 +680,7 @@ function barnyard_apply {
 
         [[ -v o_ref ]] && o_barnyard[branch]=$o_ref
 
+        git config --global gpg.ssh.allowedSignersFile /dev/null
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
         if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
