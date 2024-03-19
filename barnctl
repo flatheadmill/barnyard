@@ -362,7 +362,7 @@ function barnctl_quotedoc {
 }
 
 function abend {
-    barnctl_quotedoc < /dev/stdin 1>&2
+    barnctl_quotedoc < <(cat) 1>&2
     exit 1
 }
 
