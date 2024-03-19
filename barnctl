@@ -826,8 +826,8 @@ function machine {
     typeset hostname=${1:-}
     shift
     typeset disabled=$@[(Ie)enabled=0]
+    o_barnyard[hostname]="$hostname"
     if [[ $disabled -eq 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
-        o_barnyard[hostname]="$hostname"
         printf '<machine>: '
         printf ' %q' "$hostname"
         printf '\n'
