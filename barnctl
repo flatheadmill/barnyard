@@ -751,6 +751,13 @@ function @ {
     [[ "${module:1}" =~ $regex ]] || abend<<'    EOF'
         error: invalid module name $module
     EOF
+    print here $module[1]
+    if [[ $module[1] =~ @ ]]; then
+        print $module[1] "$@"
+        $module "$@"
+        return
+    fi
+    print there
     typeset filename key value
     filename="machines/${o_barnyard[hostname]}/$module"
     # print -R "_order=$__o_registers[order]" > "$filename"
