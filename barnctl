@@ -752,7 +752,6 @@ function @ {
         error: invalid module name $module
     EOF
     if [[ $module[1] =~ @ ]]; then
-        print $module[1] "$@"
         $module "$@"
         return
     fi
