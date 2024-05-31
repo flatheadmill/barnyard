@@ -718,11 +718,15 @@ function {
     source "${o_barnyard[barnyard]}/../code/modules/$module/${o_barnyard[operation]}.zsh"
 } "$@"
 ___ barnctl_generate ___
+function __barnyard_read_config {
+    [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
+}
+
 function machine {
     typeset hostname=${1:-}
     shift
     typeset disabled=$@[(Ie)enabled=0]
-    o_barnyard[hostname]="$hostname"
+    o_barnyard[hostname]=$hostname
     __o_registers[order]=0
     __o_registers[excluded]=1
     if [[ "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
@@ -735,7 +739,29 @@ function machine {
             rm -rf "machines/${hostname}"
             mkdir -p "machines/${hostname}"
             printf '_apply=never\n' > "machines/${hostname}/order"
-            @ machine "$@"
+            @ machine "$@" _appply=never
+            print -- "$@"
+            function {
+                typeset regex='^([^+=]+)(\+?=)(.*)$' line array=() key element_type value
+                while read -r line; do
+                    [[ $line =~ $regex ]] || { print -u 2 bad_config $config; exit 1 }
+                    key=$match[1] element_type=$match[2] value=$match[3]
+                    case "$element_type" in
+                        += )
+                            if (( ${+o_machine[$key]} )); then
+                                array=( "${(@Q)${(@z)o_machine[$key]}}" )
+                            else
+                                array=()
+                            fi
+                            array+=( $value )
+                            o_machine[$key]=${(@qq)${array[@]}}
+                            ;;
+                        = )
+                            o_machine[$key]=$value
+                            ;;
+                    esac
+                done < machines/$hostname/machine
+            }
         fi
     fi
 }
@@ -744,7 +770,7 @@ function @ {
     (( $__o_registers[excluded] )) && return
     typeset module=${1:-}
     shift
-    [[ -z "$module" ]] && abend<<'    EOF'
+    [[ -z $module ]] && abend<<'    EOF'
         error: module name is required
     EOF
     typeset regex='[a-z0-9_@]+'
@@ -813,12 +839,12 @@ function @ {
 }
 
 function {
-    typeset -A o_barnyard __o_registers
+    typeset -A o_machine o_barnyard __o_registers
     o_barnyard[include]=${1:-}
     o_barnyard[exclude]=${2:-}
     o_barnyard[configuration]=${3:-}
     shift 3
-    source "$o_barnyard[configuration]"
+    source $o_barnyard[configuration]
 } "$@"
 ___
 ___ barnctl_inventory ___
