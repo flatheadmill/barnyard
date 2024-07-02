@@ -740,7 +740,6 @@ function machine {
             mkdir -p "machines/${hostname}"
             printf '_apply=never\n' > "machines/${hostname}/order"
             @ machine "$@" _appply=never
-            print -- "$@"
             function {
                 typeset regex='^([^+=]+)(\+?=)(.*)$' line array=() key element_type value
                 while read -r line; do
