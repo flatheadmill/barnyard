@@ -1052,11 +1052,11 @@ function command_barnyard_compile {
         else
             typeset dir=${ZSH_ARGZERO:A:h:h}
             cat $dir/lib/barnyard/header.zsh
-            printf '\n'
+            printf '\n\n___ barnyard_include ___\n\n'
             cat $dir/lib/barnyard/heredoc.zsh
             printf '\n'
             cat $dir/lib/barnyard/block.zsh
-            printf '\n'
+            printf '\n\n___\n\n'
             cat $dir/lib/barnyard/parse.zsh
             printf '\n'
             cat $dir/bin/barnyard
@@ -1101,7 +1101,8 @@ function {
 exit
 
 ___ barnyard_apply ___
-source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
+source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' < <("$BARNYARD_PATH/barnyard" compile))
+source <(awk '/^___ barnyard_include ___/{flag=1;next}/^___/{flag=0}flag' < <("$BARNYARD_PATH/barnyard" compile))
 
 typeset -A o_barnyard=( "${(@Q)${(@z)__BARNYARD_O_BARNYARD__}}" ) o_module=( "${(@Q)${(@z)__BARNYARD_O_MODULE__}}" )
 unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
@@ -1113,5 +1114,8 @@ function barnyard_always {
 
 cd "$o_barnyard[archive]"
 
-source "$o_barnyard[source]"
+function {
+    typeset -A o_block
+    source "$o_barnyard[source]"
+}
 ___
