@@ -653,23 +653,18 @@ exit
 # because the key never leaves the machine.
 
 ___ barnctl_prepare ___
-barnyard_divider() {
-    typeset label=${1:-}
-    typeset bar=--------------------------------------------------------------------------------
-    shift
-    typeset prefix="------- $label "
-    echo "$bar"
-    echo "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
-    echo "$bar"
-}
-barnyard_divider 'apt update'
-apt-get update
-barnyard_divider 'install zsh, gnupg2, git'
-apt-get install -y zsh gnupg2 git
-barnyard_divider 'install barnyard'
+echo '--- apt ---'
+echo '$ apt-get update && apt-get install -y zsh gnupg2 git'
+{
+    apt-get update && apt-get install -y zsh gnupg2 git
+} 2>&1 | sed 's/^/    /'
+echo '--- barnyard ---'
+echo '$ echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard'
 echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
+echo '$ chmod 755 /usr/local/bin/barnyard'
 chmod 755 /usr/local/bin/barnyard
-barnyard version
+echo '$ barnyard version'
+barnyard version 2>&1 | sed 's/^/    /'
 barnyard prepare
 ___ barnctl_upgrade ___
 if [[ -e /usr/local/bin/barnyard ]]; then

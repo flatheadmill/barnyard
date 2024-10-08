@@ -25,7 +25,8 @@ function ___ {
 # something like `@/modules/postgresql/common`.
 export BARNYARD_PATH=${${0:a}%/*}
 
-VERSION=$(zsh $BARNYARD_PATH/barnctl version)
+BARNYARD_VERSION=0.0.0
+BARNYARD_RELEASE_DATE='January 1, 1970'
 
 function zsh_parse_arguments {
     typeset error=${${1:-}:q} context=${${2:-}:q}
@@ -910,47 +911,72 @@ function barnyard_install_age {
 
 function command_barnyard_prepare {
     eval "$(barnyard_parse_arguments prepare h,help -- "$@")"
-    barnyard_divider 'check gpg'
-    gpg --version
-    barnyard_divider 'check git'
-    git --version
-    barnyard_divider 'install age'
-    barnyard_temporary_directory
-    (barnyard_install_age)
-    barnyard_divider 'check age'
-    age --version
-    barnyard_divider 'check age-keygen'
-    age-keygen --version
-    barnyard_divider 'generate age key'
-    mkdir -p /etc/barnyard
-    if [[ ! -e /etc/barnyard/age ]]; then
-        age-keygen -o /etc/barnyard/age
-    fi
-    mkdir -p /var/lib/barnyard/commit/age
-    grep '^# public key: ' /etc/barnyard/age | sed 's/# public key: //' | tee /var/lib/barnyard/commit/age/$(hostname --long)
-    barnyard_divider 'generate root private key'
-    ( umask 077 && mkdir -p /etc/barnyard/gnupg )
-    export GNUPGHOME=/etc/barnyard/gnupg
-    barnyard_quotedoc <<'    EOF' > "$BARNYARD_TEMP/key_details"
-        %echo Generating a basic OpenPGP key
-        Key-Type: RSA
-        Key-Length: 2048
-        Subkey-Type: RSA
-        Subkey-Length: 2048
-        Name-Real: $(hostname --long)
-        Name-Comment: Root Personal Key
-        Name-Email: user@$(hostname --long)
-        Expire-Date: 0
-        %no-ask-passphrase
-        %no-protection
-        # Do a commit here, so that we can later print "done" :-)
-        %commit
-        %echo done
-    EOF
-    if ! gpg --list-keys $(hostname --long); then
-        gpg --verbose --batch --gen-key "$BARNYARD_TEMP/key_details"
-    fi
-    gpg --list-keys
+    typeset tmp; tmp=$(mktemp -d)
+    {
+        pushd $tmp
+        banner 'git'
+        {
+            try show git --version || tried
+        } always {
+            caught
+        } > >(indent)
+        banner 'age'
+        {
+            try show curl -sLO https://github.com/FiloSottile/age/releases/download/v1.0.0/age-v1.0.0-linux-amd64.tar.gz || tried
+            try show tar zxf age-v1.0.0-linux-amd64.tar.gz || tried
+            try show install -m 755 age/age /usr/local/bin/age || tried
+            try show install -m 755 age/age-keygen /usr/local/bin/age-keygen || tried
+            try show age --version || tried
+            try show age-keygen --version || tried
+            { try show || tried; } <<'            EOF'
+                [[ -e /etc/barnyard/age ]] || age-keygen -o /etc/barnyard/age
+            EOF
+            try show mkdir -p /var/lib/barnyard/commit/age || tried
+            { try show || tried; } <<'            EOF'
+                grep '^# public key: ' /etc/barnyard/age |
+                    sed 's/# public key: //' |
+                    tee /var/lib/barnyard/commit/age/$(hostname --long)
+            EOF
+        } always {
+            caught
+        } > >(indent)
+        banner 'gpg'
+        {
+            try show gpg --version || tried
+            try show eval 'export GNUPGHOME=/etc/barnyard/gnupg' || tried
+            try show eval 'print $GNUPGHOME' || tried
+            { try show || tried; } <<'            EOF'
+                ( umask 077 && mkdir -p /etc/barnyard/gnupg )
+            EOF
+            { try show || tried; } <<'            EOF'
+                cat <<EOF | tee key_details
+                %echo Generating a basic OpenPGP key
+                Key-Type: RSA
+                Key-Length: 2048
+                Subkey-Type: RSA
+                Subkey-Length: 2048
+                Name-Real: $(hostname --long)
+                Name-Comment: Root Personal Key
+                Name-Email: user@$(hostname --long)
+                Expire-Date: 0
+                %no-ask-passphrase
+                %no-protection
+                # Do a commit here, so that we can later print "done" :-)
+                %commit
+                %echo done
+                EOF
+            EOF
+            { try show || tried; } <<'            EOF'
+                gpg --list-keys $(hostname --long) || gpg --verbose --batch --gen-key key_details
+            EOF
+            try show gpg --list-keys || tried
+        } always {
+            caught
+        } > >(indent)
+    } always {
+        popd
+        [[ -d $tmp ]] && rm -rf $tmp
+    }
 }
 
 # We could transfer this age encrypted, but we assume it is comming from
@@ -1010,12 +1036,70 @@ function command_barnyard_version {
     print -R "$VERSION"
 }
 
+function command_barnyard_compile {
+    eval "$(options -s v,version d,date -- "$@")"
+    # TODO Regular expression checking.
+    if [[ -v o_version ]]; then
+        BARNYARD_VERSION=$o_version
+    fi
+    # TODO Regular expression that this is epoch seconds.
+    if [[ -v o_date ]]; then
+        BARNYARD_RELEASE_DATE=$(TZ=UTC date --date=@$o_date +'%B %-d, %Y')
+    fi
+    {
+        if [[ -v BARNYARD_IS_COMPILED ]]; then
+            cat ${ZSH_ARGZERO:A}
+        else
+            typeset dir=${ZSH_ARGZERO:A:h:h}
+            cat $dir/lib/barnyard/header.zsh
+            printf '\n'
+            cat $dir/lib/barnyard/heredoc.zsh
+            printf '\n'
+            cat $dir/lib/barnyard/block.zsh
+            printf '\n'
+            cat $dir/lib/barnyard/parse.zsh
+            printf '\n'
+            cat $dir/bin/barnyard
+        fi
+    } | sed -e "$(
+        printf 's/^BARNYARD_VERSION=.*$/BARNYARD_VERSION=%s/\n' $BARNYARD_VERSION
+    )" -e "$(
+        printf 's/^BARNYARD_RELEASE_DATE=.*$/BARNYARD_RELEASE_DATE=%s/\n' $BARNYARD_RELEASE_DATE
+    )"
+}
+
+function _barnyard_options_error {
+    typeset func=${1:-} reason=${2:-} flag=${3:-}
+    case $reason in
+        required )
+            printf '`%s` is a required argument.\n' $flag 1>&2
+            exit 1
+            ;;
+        execute )
+            print "here's some help"
+            exit
+    esac
+}
+
+function options {
+    parser _acrectl_options_error 2 "$@"
+    printf '(( $o_help )) && acrectl_usage %s' $funcstack[2]
+}
+
 function {
     eval "$(barnyard_parse_arguments barnyard h,help -- "$@")"
+    typeset -A o_block
+    typeset dir=${ZSH_ARGZERO:A:h:h}
+    if [[ ! -v BARNYARD_IS_COMPILED ]]; then
+        source $dir/lib/barnyard/heredoc.zsh
+        source $dir/lib/barnyard/block.zsh
+        source $dir/lib/barnyard/parse.zsh
+    fi
     barnyard_next_command barnyard "$@"
 } "$@"
 
 exit
+
 ___ barnyard_apply ___
 source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard")
 
