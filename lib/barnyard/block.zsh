@@ -388,7 +388,12 @@ function {
     {
         typeset var
         print good
-        try show echo 1 | tried
+        try show echo 1 || tried
+        { try show -q || tried; } <<'        EOF'
+            cat <<EOF > /dev/null
+                hello
+            EOF
+        EOF
         show -v var echo 'hello, world'
         show cat <<< "Hello"
         show <<'        EOF'

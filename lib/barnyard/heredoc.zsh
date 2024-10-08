@@ -113,7 +113,7 @@ function heredoc {
                             printf "IFS= read -rd '' %s < <(heredoc -q)\n" $variable[2]
                         else
                             IFS= read -rd '' heredoc < <(heredoc)
-                            printf 'cat <<EOF\n%sEOF\n' $heredoc
+                            printf 'cat <<__HEREDOC_Q_EOF__\n%s__HEREDOC_Q_EOF__\n' $heredoc
                         fi
                         ;;
                 esac
