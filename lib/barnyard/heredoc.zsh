@@ -16,7 +16,7 @@ function warn {
                 ;&
             * )
                 printf -v message -- "$@"
-                printf 'warning: %s\n' $message 1>&2
+                printf '%s\n' $message 1>&2
                 ;;
         esac
     fi
@@ -36,7 +36,7 @@ function abend {
                 ;&
             * )
                 printf -v message -- "$@"
-                printf 'warning: %s\n' $message 1>&2
+                printf '%s\n' $message 1>&2
                 ;;
         esac
     fi
@@ -47,17 +47,18 @@ function heredoc {
     if [[ $# -eq 0 || ( $# -eq 1 && $1 = - ) ]]; then
         function {
             typeset match=() lines=() chomped=()
-            typeset spaces=65536 leading='^( *)([^[:space:]])' line
-            for line in "${(Af)$(cat)}"; do
-                lines+=( $line )
+            typeset spaces=65536 leading='^( *)([^[:space:]])' line heredoc
+            IFS= read -rd '' heredoc
+            for line in "${(@Af)heredoc}"; do
+                lines+=( "$line" ) # remove the double quotes and blank lines disappear
                 if [[ $line =~ $leading && ${#match[1]} -lt $spaces ]]; then
                     spaces=${#match[1]}
                 fi
             done
             for line in "${(@)lines}"; do
-                chomped+=( ${line[spaces + 1,-1]} )
+                chomped+=( "${line[spaces + 1,-1]}" ) # remove the double quotes and blank lines disappear
             done
-            printf '%s' ${(pj:\n:)chomped}$'\n'
+            printf '%s' ${(pj:\n:)chomped[1,-2]}$'\n'
         }
     else
         # We create code to source that will not shadow any variables
@@ -124,9 +125,12 @@ function heredoc {
 
 function {
     [[ $1 == 'toplevel' ]] || return
-    heredoc <<'    EOF'
+    heredoc -q <<'    EOF'
+        hello, world
+
         hello, world
     EOF
+    return
     heredoc - <<'    EOF'
         hello, world
     EOF

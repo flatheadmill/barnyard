@@ -79,6 +79,8 @@ function tekton::close {
 
 #
 function banner {
+    o_block[pids]=''
+    o_block[stop]=0
     integer fd out
     # Worked on making it so that we could just close the input to terminte the
     # loop, but unlike the `indent` input, the `try` input cannot be closed
@@ -104,12 +106,8 @@ function banner {
     # Keep both the input and output.
     exec {fd}>&p; o_block[try]=$fd
     exec {fd}<&p; o_block[tried]=$fd
-    # Create a bogo standard error indenter `coproc`.
-    coproc {
-        coproc :
-    }
-    # Save pid for wait.
-    o_block[sed]=${!}
+    # No block intender.
+    o_block[sed]=0
     # Create the initial empty AWK array.
     print reset >&${o_block[try]}
     # Copy the standard output of the main process for use in the indent `coproc`.
@@ -123,9 +121,13 @@ function banner {
         # Clone the output fd of the word count.
         exec {count}<&p
         # Format and print the banner.
-        typeset message
-        printf -v message "$@"
-        printf '--- %s ---\n\n' $message >&$out
+        if (( $# )); then
+            typeset message
+            printf -v message "$@"
+            printf '--- %s ---\n\n' $message >&$out
+        else
+            print -- >&$out
+        fi
         # Tee into the word count, indent, and print to parent's standard out.
         tee >(>&p) | sed -ue 's/^\(..*\)$/    \1/' >&$out
         # Close the >&p and <&p of our word count `coproc`.
@@ -182,6 +184,7 @@ function try {
     }
     # We will wait for our standard error intent `coproc` to exit.
     o_block[sed]=${!}
+    o_block[pids]+=" try $o_block[sed]"
     # Tell the try `coproc` to clear any error lines it's gathered.
     print reset >&${o_block[try]}
     # If called with `-v` we're going to give the user a handle to the `try`
@@ -247,18 +250,48 @@ function tried {
     THROW= 2>/dev/null
 }
 
+# Often we want to show the user that we're going to give up on a task.
+# Perhaps it has already been performed, or perhaps flags indicate that
+# members of a set should be skipped.
+
+# In the case of skipping, we are probably already in a loop, so we can show
+# the user using `show eval '(( skip )) && continue'`. If we are not in a
+# loop, we've taken to creating a dummy loop with `while true;` so we have a
+# loop to `break` from. We can't do `(( skip )) && return` since it would only
+# return from the `eval` used by `show`.
+
+# The dummy loops are making the code a little bit ugly, so now we have
+# `stop`. #  `stop` will raise an error that can be caught by our `always`
+# block and if the `o_block[stop]` flag is true, it will reset the
+# `TRY_BLOCK_ERROR` instead of doing an `exit 1`.
+
+# We have now changed `show` to create a function `show:eval` using `eval` and
+# then invoke that function. This is because thrown errors do not propagate
+# out of `eval`. So far, using `show:eval` works and when there are compile
+# errors, the line numbers are correct.
+
+#
+function stop {
+    o_block[stop]=1
+    if (( $# )); then
+        printf -v message "$@"
+        printf -v message '# stopping: %s' $message
+        print $message
+    fi
+    typeset -r THROW
+    THROW= 2>/dev/null
+}
+
 #
 function throw {
     # Wait on the last standard error indenter `coproc`.
-    wait $o_block[sed]
+    if (( $o_block[sed] )); then
+        wait $o_block[sed]
+    fi
+    # Clear indenter pid.
+    o_block[sed]=0
     # Dump the messages.
     print reset >&${o_block[try]}
-    # Create a bogo standard error indenter `coproc`.
-    coproc {
-        coproc :
-    }
-    # Save for wait.
-    o_block[sed]=${!}
     # Format the throw message.
     typeset message
     if (( $# )); then
@@ -270,14 +303,26 @@ function throw {
     THROW= 2>/dev/null
 }
 
+function okay {
+    ! (( $TRY_BLOCK_ERROR && ! o_block[stop] ))
+}
+
 # This one contains the close that was hard to find. It is obvious now but I'd
 # introduced additional nested blocks in a search for something that works.
 function caught {
     # We close the handles to both sides of the try `coproc`.
     tekton::close user
     # Wait on the last standard error indenter `coproc`.
-    wait $o_block[sed]
-    o_block[sed]=0
+    typeset waited
+    if (( $o_block[sed] )); then
+        wait $o_block[sed]
+        waited=$?
+        # See `wait` in `man zshbuiltins`. Also,https://stackoverflow.com/a/56879673
+        if (( waited )); then
+            print -u 2 $waited$o_block[pids]
+        fi
+        o_block[sed]=0
+    fi
     # We have a copy of the input to the indent `coproc`. We opened it and left
     # it open so that the `indent` program could inherit the file handle. It was
     # open for the whole block in the parent process, our process, but it is
@@ -302,16 +347,20 @@ function caught {
     wait $o_block[pid]
     # And now we can print an error message, if any, after all the indented
     # output from the block.
-    if (( $TRY_BLOCK_ERROR )); then
-        if (( ${+o_block[abend]} )); then
-            printf 'abend: %s\n' $o_block[abend] 1>&2
+    if (( TRY_BLOCK_ERROR )); then
+        if (( o_block[stop] )); then
+            TRY_BLOCK_ERROR=0
         else
-            print -u 2 'abend:'
+            if (( ${+o_block[abend]} )); then
+                printf 'abend: %s\n' $o_block[abend] 1>&2
+            else
+                print -u 2 'abend:'
+            fi
+            if [[ -n $err ]]; then
+                printf '\n%s\n' $err 1>&2
+            fi
+            exit 1
         fi
-        if [[ -n $err ]]; then
-            printf '\n%s\n' $err 1>&2
-        fi
-        exit 1
     fi
 }
 
@@ -344,57 +393,75 @@ function piped {
     (( ! ${#${(@)pipestatus:#0}} ))
 }
 
+function show:eval {
+}
+
+function show:compile {
+    printf -v code 'function show:eval {
+        %s
+    }' $1
+    eval $code
+}
+
 # TODO for variables just use heredocs.
 function show {
-    typeset match=()
-    if [[ $# -eq 0 || $1 = - || $1 = -f || $1 = -q ]]; then
+    [[ $1 = -v ]] && {
+        print -u 2 -- '-v no longer supported'
+        exit 1
+    }
+    function {
         typeset code
-        heredoc -v code $1
-        print -u 2 $code
-        printf '$ %s' $code
-        eval $code
-    elif [[ $1 = eval ]]; then
-        printf '$ %s\n' $2
-        "$@"
-    else
-        if [[ $1 = -v ]]; then
-            match[2]=$2
-            shift 2
-        fi
-        match[1]=$({
-            typeset word words=()
-            for word in "$@"; do
-                if [[ -z $word || ${(q)word} = *"\\"* ]]; then
-                    words+=( "${(qqq)word}" )
-                else
-                    words+=( "$word" )
-                fi
-            done
-            printf '%s\n' ${(j: :)words}
-        })
-        if (( ${#match} == 2 )); then
-            show eval "$(printf '%s=$(%s)\n' $match[2] $match[1])"
+        if [[ $# -eq 0 || $1 = - || $1 = -f || $1 = -q ]]; then
+            heredoc -v code "$@"
+            printf '$ %s' "$code"
+            show:compile $code
+        elif [[ $1 = eval ]]; then
+            printf '$ %s\n' $2
+            show:compile $2
         else
-            show eval $match[1]
+            code=$({
+                typeset word words=()
+                for word in "$@"; do
+                    if [[ -z $word || ${(q)word} = *"\\"* ]]; then
+                        words+=( ${(qqq)word} )
+                    else
+                        words+=( $word )
+                    fi
+                done
+                printf '%s\n' ${(j: :)words}
+            })
+            printf '$ %s\n' $code
+            show:compile $code
         fi
-    fi
+    } "$@"
+    show:eval
 }
 
 function {
     [[ $1 = toplevel ]] || return
     source ${ZSH_ARGZERO:A:h}/heredoc.zsh
     typeset -A o_block
+    banner stop
+    {
+        show <<'        EOF'
+            print called && stop finis
+        EOF
+        print continued
+    } always {
+        print catching
+        okay && print okay
+        caught
+    } > >(indent)
     banner 'this is a banner, hello %s' world
     {
         typeset var
         print good
         try show echo 1 || tried
-        { try show -q || tried; } <<'        EOF'
-            cat <<EOF > /dev/null
+        { try show || tried; } <<'        EOF'
+            cat <<EOF
                 hello
             EOF
         EOF
-        show -v var echo 'hello, world'
         show cat <<< "Hello"
         show <<'        EOF'
             for i in {1..2}; do print $i; done
