@@ -1,10 +1,19 @@
 #!/usr/bin/env zsh
 
-VERSION=0.24.2
+VERSION=0.25.0
 
 SCRIPT_DIR=${${0:a}%/*}
 
 function ___ {
+}
+
+function barnctl_args_error {
+    print -u 2 -- "$@"
+    exit 1
+}
+
+function args {
+    parser barnctl_args_error 3 "$@"
 }
 
 function zsh_parse_arguments {
@@ -593,32 +602,30 @@ function barnctl_command_inventory {
     done
 }
 
-function barnctl_command_prepare {
-    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
-
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
+function barnctl_barnyard_source {
+    typeset barnyard=$($BARNCTL_DIR/bin/barnyard compile --version $VERSION)
+    heredoc -f $barnyard <<'    EOF'
+        set -e
+        BARNYARD_SOURCE=$(cat <<'EOS'
+        %s
+        EOS
+        )
     EOF
+}
 
-    typeset server=${1:-}
-
+function barnctl:prepare {
+    eval "$(args h,hostname -b h,help -- "$@")"
+    [[ -v o_hostname ]] || abend 'fatal: ssh hostname is required'
     {
-        print -R 'set -e'
-        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
-        sed 's/VERSION=.*/VERSION='$VERSION'/' "${SCRIPT_DIR}/barnyard"
-        print -R 'EOS'
-        print -R ')'
-        print -R ''
+        barnctl_barnyard_source
         barnctl_shell_resource barnctl_prepare
-    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_hostname" '/usr/bin/sudo /bin/bash'
 }
 
 function barnctl_command_upgrade {
-    eval "$(barnctl_parse_arguments upgrade "h,help" -- "$@")"
+    eval "$(args h,hostname -b h,help -- "$@")"
 
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
+    [[ -v o_hostname ]] || abend 'fatal: ssh hostname is required'
 
     typeset server=${1:-}
 
@@ -635,16 +642,34 @@ function barnctl_command_upgrade {
     } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
 
-function barnctl_command_version {
-    eval "$(barnctl_parse_arguments version "h,help" -- "$@")"
-    print -R "$VERSION"
+function barnctl:version {
+    eval "$(args -b h,help -- "$@")"
+    print $VERSION
 }
 
+# Invoke the next sub-command from the extracted commands. The prefix is the
+# underbar delimited path of commands visited so far.
+function delegate {
+    typeset prefix=$funcstack[2]
+    (( $# )) || abend 'fatal: %s expects a command argument' ${prefix//:/ }
+    typeset delegate=$prefix:$1
+    shift
+    (( $BARNCTL_COMMANDS[(Ie)$delegate] )) || abend 'fatal: no such command `%s`.' ${delegate//:/ }
+    $delegate "$@"
+}
 
-function {
-    eval "$(barnctl_parse_arguments root "h,help" -- "$@")"
-    barnctl_next_command "" "$@"
-} "$@"
+function barnctl {
+    typeset BARNCTL_DIR=${ZSH_ARGZERO:A:h:h}
+    typeset -gx BARNCTL_COMMANDS=( "${(@f)$(sed -n 's/^function *\(barnctl:[^:][^ ]*\) *{$/\1/p' $BARNCTL_DIR/bin/barnctl)}" )
+    source $BARNCTL_DIR/lib/barnyard/parse.zsh
+    source $BARNCTL_DIR/lib/barnyard/heredoc.zsh
+    source $BARNCTL_DIR/lib/barnyard/block.zsh
+    source $BARNCTL_DIR/lib/barnyard/splat.zsh
+    eval "$(args -b h,help -- "$@")"
+    delegate "$@"
+}
+
+barnctl "$@"
 
 exit
 
