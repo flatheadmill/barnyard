@@ -251,47 +251,6 @@ function barnyard_argument_error {
     exit 1
 }
 
-function barnyard_parse_arguments {
-    zsh_parse_arguments barnyard_argument_error "$@"
-    printf "(( \$o_help )) && usage_$1\n"
-}
-
-# Note that the pattern excludes any function names ending in `_`.
-IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
-    sed -n 's/^function command_\(barnyard_.*[^_]\) {$/\1/p' "$BARNYARD_PATH/barnyard" \
-)
-
-function barnyard_next_command {
-    typeset prefix=${1:-} func
-    shift
-    if (( ! $# )); then
-        abend '`%s` expects a command argument' "${prefix//_/ }"
-    fi
-    typeset cmd=${1:-}
-    shift
-    for func in "${BARNCTL_COMMANDS[@]}"; do
-        if [[ "$func" = "${prefix}_${cmd}" ]]; then
-            "command_$func" "$@"
-            return
-        fi
-    done
-    func="${prefix}_${cmd}"
-    abend 'no such command `%s`' ${${func/#root/barnyard}//_/ }
-}
-
-unset BARNYARD_TEMP
-function barnyard_cleanup {
-    [[ -n "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
-}
-
-function barnyard_temporary_directory {
-    [[ -n "$BARNYARD_TEMP" ]] && return
-    BARNYARD_TEMP="$(mktemp -d)"
-    export BARNYARD_TEMP
-}
-
-trap barnyard_cleanup EXIT
-
 ___ barnyard_common ___
 typeset -A PRIORITY
 
@@ -562,13 +521,12 @@ function barnyard_quotedoc {
 
 function barnyard_run_ {
     typeset -A o_module barnyard
-    typeset -a applied diffs args
-    typeset module program code
+    typeset module program code applied=() diffs=() args=()
 
     barnyard=( "${(@kv)o_barnyard}" )
 
     module=${1:-}
-    args=("${@:2}")
+    args=( "${@:2}" )
     program=${module#*/}
     module=${module%%/*}
     [[ $program = $module ]] && program=apply.zsh
@@ -636,7 +594,11 @@ function barnyard_run_ {
     barnyard_string_resource barnyard_apply > "$BARNYARD_TEMP/apply"
     zsh "$BARNYARD_TEMP/apply" "${args[@]}"
     code=$?
-    (( $code )) && log err code=$code module="$module" 'module %s exited %d' "$module" $code && return $code
+
+    if (( $code )); then
+        log err code=$code module="$module" 'module %s exited %d' "$module" $code
+        return $code
+    fi
 
     if [[
         "$o_barnyard[repository]" = /var/lib/barnyard/repository && \
@@ -672,11 +634,11 @@ function barnyard_order_modules {
 }
 
 function barnyard_apply {
-    export BARNYARD_TEMP="$(mktemp -d)"
+    export BARNYARD_TEMP
+    BARNYARD_TEMP=$(mktemp -d) || abend 'unable to create temporary directory'
     {
         barnyard_version_check
-
-        [[ -e /etc/barnyard/config ]] || abend 'barnyard not installed'
+        [[ -e /etc/barnyard/config ]] || abend 'no configuration'
         barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet $o_quiet "${(@kv)o_barnyard}"
 
         [[ -v o_ref ]] && o_barnyard[branch]=$o_ref
@@ -685,6 +647,7 @@ function barnyard_apply {
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
         if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
+            # TODO Left over from when some repositories were not mirrored.
             if ! git -C "${o_barnyard[repository]}" config --get --bool remote.origin.mirror > /dev/null; then
                 remote=$(git -C "${o_barnyard[repository]}" config --get remote.origin.url)
                 rm -rf /var/lib/barnyard/repository
@@ -692,7 +655,8 @@ function barnyard_apply {
             fi
 
             if (( $o_barnyard[fetch] ));then
-                git -C "$o_barnyard[repository]" remote update --prune || abend 'fatal: cannot update remote'
+                git -C "$o_barnyard[repository]" remote update --prune ||
+                    abend 'fatal: cannot update remote'
             fi
 
             o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} rev-parse $o_barnyard[branch])
@@ -713,12 +677,15 @@ function barnyard_apply {
         else
             [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
             # TODO Not a good check, check harder.
-            [[ -d "$o_barnyard[repository]" ]] || abend 'no barnyard at path %s' "${o_barnyard[repository]:q}"
+            [[ -d "$o_barnyard[repository]" ]] ||
+                abend 'no barnyard at path %s' "${(qqq)o_barnyard[repository]}"
 
             typeset barnyard_user
-            barnyard_user=$(stat -c '%U' "$(git -C "${o_barnyard[repository]}/conf" rev-parse --git-dir)/index") || abend 'not a git repo %s' "$o_barnyard[repository]/conf"
+            barnyard_user=$(stat -c '%U' "$(git -C "${o_barnyard[repository]}/conf" rev-parse --git-dir)/index") ||
+                abend 'not a git repo %s' "$o_barnyard[repository]/conf"
 
-            [[ "$barnyard_user" == $SUDO_USER ]] || abend 'sudo user %s does not own %s' "$SUDO_USER" "${o_barnyard[repository]:q}"
+            [[ "$barnyard_user" == $SUDO_USER ]] ||
+                abend 'sudo user %s does not own %s' ${(qqq)SUDO_USER} ${(qqq)o_barnyard[repository]}
 
             o_barnyard[archive]="$BARNYARD_TEMP/run"
             mkdir -p "$BARNYARD_TEMP/run"
@@ -731,19 +698,19 @@ function barnyard_apply {
     }
 }
 
-function command_barnyard_always {
+function barnyard:always {
     typeset o_repository=/var/lib/barnyard/repository
-    eval "$(barnyard_parse_arguments always f,fetch v,version: o_repository=b,barnyard: q,quiet h,help -- "$@")"
-    typeset -A o_barnyard=( always yes repository "$(readlink -f "$o_repository")" fetch $o_fetch )
+    eval "$(args v,version -d r,repository -b q,quiet h,help f,fetch -- "$@")"
+    typeset -A o_barnyard=( always yes repository ${o_repository:A} fetch $o_fetch )
     barnyard_apply "$@"
 }
 
-function command_barnyard_apply {
+function barnyard:apply {
     typeset o_repository=/var/lib/barnyard/repository
-    eval "$(barnyard_parse_arguments apply d,dry-run o_repository=b,barnyard: r,ref: v,version: q,quiet h,help -- "$@")"
+    eval "$(args v,version R,ref -d r,repository -b d,dry-run q,quiet h,help -- "$@")"
     [[ -v o_ref && $o_dry_run = 0 ]] && abend 'cannot specify ref except for dry-run'
     (( $# )) && abend 'barnyard apply takes no positional arguments'
-    typeset -A o_barnyard=( always no repository "$(readlink -f "$o_repository")" dry_run $o_dry_run fetch 1 )
+    typeset -A o_barnyard=( always no repository "${o_repository:A}" dry_run $o_dry_run fetch 1 )
     barnyard_apply "$@"
 }
 
@@ -833,42 +800,56 @@ function command_barnyard_systemd {
 # and so yes, it could change. You might want to rename your repository, why
 # not? It's not immutable like the age or gpg key.
 
-function command_barnyard_clone {
-    eval "$(barnyard_parse_arguments clone v,version: h,help -- "$@")"
-
-    export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
-
+function barnyard:clone {
+    eval "$(args 'r,repository' v,version -b h,help -- "$@")"
     barnyard_version_check
+    [[ -v o_repository ]] || abend 'a git repository url is required'
+    banner 'clone'
+    {
+        { try show || tried 'no barnyard ssh key'; } <<'        EOF'
+            [[ -e /etc/barnyard/id_barnyard ]]
+        EOF
+        { try show || tried 'no barnyard "known_hosts" file'; } <<'        EOF'
+            [[ -e /etc/barnyard/known_hosts ]]
+        EOF
+        { try show || tried; } <<'        EOF'
+            export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
+        EOF
+        try show rm -rf /var/lib/barnyard/repository || tried
+        { try show -f "${o_repository%#*}" || tried; } <<'        EOF'
+            git clone --mirror %q /var/lib/barnyard/repository
+        EOF
+        { try show -f "${o_repository##*#}" || tried; } <<'        EOF'
+            printf 'branch=%s\\n' > /etc/barnyard/config
+        EOF
+    } always {
+        caught
+    } > >(indent)
+    exit
 
-    (( $# )) || abend 'a git repository url is required'
-    typeset repository=${1:-}
-
-    [[ -e /etc/barnyard/id_barnyard ]] || abend 'no barnyard ssh key'
-
-    rm -rf /var/lib/barnyard/repository
-
-    git clone -q --mirror "${repository%#*}" /var/lib/barnyard/repository || abend 'unable to clone repository %s' "$repository"
-
-    printf 'branch=%s\n' "${repository##*#}" > /etc/barnyard/config
 }
 
 function command_barnyard_commit {
-    eval "$(barnyard_parse_arguments apply v,version: h,help -- "$@")"
+    eval "$(args v,version -b h,help -- "$@")"
     barnyard_version_check
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
 }
 
-function command_barnyard_gpg_trust {
-    eval "$(barnyard_parse_arguments gpg_import v,version: h,help -- "$@")"
-
+function barnyard:gpg:trust {
+    eval "$(args -p,fingerprint v,version -b h,help -- "$@")"
     barnyard_version_check
-
-    (( $EUID == 0 )) || abend 'must be run as root'
-
-    (( $# )) || abend 'a fingerprint is required'
-
-    typeset fingerprint=${1:-}
-    GNUPGHOME=/etc/barnyard/gnupg gpg --batch --yes --sign-key "$fingerprint" > /dev/null 2>&1 || abend 'unable to sign key'
+    [[ -v o_fingerprint ]] || abend 'a GPG public key fingerprint is required'
+    banner 'trust GPG fingerprint'
+    {
+        { try show || tried 'must be run as root'; } <<'        EOF'
+            (( $EUID == 0 ))
+        EOF
+        { try show -f $fingerprint || tried; } <<'        EOF'
+            GNUPGHOME=/etc/barnyard/gnupg gpg --batch --yes --sign-key %q
+        EOF
+    } always {
+        caught
+    } > >(indent)
 }
 
 # Here we add a gpg key. We also need a function to remove a key. We could use
@@ -876,41 +857,48 @@ function command_barnyard_gpg_trust {
 # one and if a key was compromised they'd want to remove it without running
 # Barnyard, because Barnyard could not be trusted until the key was revoked.
 
-function command_barnyard_gpg_import {
-    eval "$(barnyard_parse_arguments gpg_import v,version: h,help -- "$@")"
-
+function barnyard:gpg:import {
+    eval "$(args f,file v,version -b h,help -- "$@")"
     barnyard_version_check
-
-    (( $EUID == 0 )) || abend 'must be run as root'
-
-    (( $# )) || abend 'a file name is required'
-
-    typeset filename=${1:-} gpg_key
-    if [[ "$filename" = - ]]; then
-        gpg_key=$(cat)
-    else
-        gpg_key=$(< "$filename") || abend 'unable to read gpg key'
-    fi
-    GNUPGHOME=/etc/barnyard/gnupg gpg --import <(printf '%s' "$gpg_key") > /dev/null 2>&1 || abend 'unable to import key'
+    [[ -v o_file ]] || abend 'GPG key file is required'
+    typeset gpg_key
+    banner 'add GPG signing key'
+    {
+        { try show || tried 'must be run as root'; } <<'        EOF'
+            (( $EUID == 0 ))
+        EOF
+        if [[ $o_file = - ]]; then
+            { try show || tried; } <<'            EOF'
+                gpg_key=$(cat)
+            EOF
+        else
+            {
+                try show -f $o_file || tried 'gpg key file does not exist';
+            } <<'            EOF'
+                [[ -e %q ]]
+            EOF
+            { try show -f $o_file || tried; } <<'            EOF'
+                gpg_key=$(<%q)
+            EOF
+        fi
+        { try show || tried; } <<'        EOF'
+            GNUPGHOME=/etc/barnyard/gnupg gpg --import <(printf %s "$gpg_key")
+        EOF
+        { try show || tried; } <<'        EOF'
+            GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys
+        EOF
+    } always {
+        caught
+    } > >(indent)
 }
 
-function command_barnyard_gpg {
-    eval "$(barnyard_parse_arguments gpg "h,help" -- "$@")"
-    barnyard_next_command barnyard_gpg "$@"
+function barnyard:gpg {
+    eval "$(args -b h,help -- "$@")"
+    delegate "$@"
 }
 
-function barnyard_install_age {
-    cd "$BARNYARD_TEMP"
-    curl -sLO https://github.com/FiloSottile/age/releases/download/v1.0.0/age-v1.0.0-linux-amd64.tar.gz
-    tar zxf age-v1.0.0-linux-amd64.tar.gz
-    find .
-    install -m 755 age/age /usr/local/bin/age
-    install -m 755 age/age-keygen /usr/local/bin/age-keygen
-    age --version
-}
-
-function command_barnyard_prepare {
-    eval "$(barnyard_parse_arguments prepare h,help -- "$@")"
+function barnyard:prepare {
+    eval "$(args h,help -- "$@")"
     typeset tmp; tmp=$(mktemp -d)
     {
         pushd $tmp
@@ -922,10 +910,6 @@ function command_barnyard_prepare {
         } > >(indent)
         banner 'age'
         {
-            try show curl -sLO https://github.com/FiloSottile/age/releases/download/v1.0.0/age-v1.0.0-linux-amd64.tar.gz || tried
-            try show tar zxf age-v1.0.0-linux-amd64.tar.gz || tried
-            try show install -m 755 age/age /usr/local/bin/age || tried
-            try show install -m 755 age/age-keygen /usr/local/bin/age-keygen || tried
             try show age --version || tried
             try show age-keygen --version || tried
             { try show || tried; } <<'            EOF'
@@ -983,61 +967,91 @@ function command_barnyard_prepare {
 # `barnctl` over SSH or at the very least from a file on the filesystem of the
 # host machine.
 
-function command_barnyard_ssh_known-hosts {
-    eval "$(barnyard_parse_arguments ssh_known-hosts v,version: h,help -- "$@")"
-
+function barnyard:ssh:known-hosts {
+    eval "$(args v,version f,file -b h,help -- "$@")"
     barnyard_version_check
-
-    (( $EUID == 0 )) || abend 'must be run as root'
-
-    (( $# )) || abend 'a file name is required'
-
-    typeset filename=${1:-} gpg_key
-    if [[ "$filename" = - ]]; then
-        filename=/dev/stdin
-    fi
-
-    rm -f /etc/barnyard/id_barnyard
-
-    cat "$filename" > /etc/barnyard/known_hosts
-
-    cat /etc/barnyard/known_hosts
+    [[ -v o_file ]] || abend 'a "known_hosts" file is required'
+    typeset known_hosts
+    banner 'set SSH known hosts'
+    {
+        { try show || tried 'must be run as root'; } <<'        EOF'
+            (( $EUID == 0 ))
+        EOF
+        if [[ $o_file = - ]]; then
+            { try show || tried; } <<'            EOF'
+                known_hosts=$(cat)
+            EOF
+        else
+            {
+                try show -f $o_file || tried '"known_hosts" file does not exist';
+            } <<'            EOF'
+                [[ -e %q ]]
+            EOF
+            { try show -f $o_file || tried; } <<'            EOF'
+                known_hosts=$(<%q)
+            EOF
+        fi
+        try show rm -f /etc/barnyard/id_barnyard || tried
+        { try show || tried; } <<'        EOF'
+            printf '%s\n' $known_hosts > /etc/barnyard/known_hosts
+        EOF
+        { try show || tried; } <<'        EOF'
+            cat /etc/barnyard/known_hosts
+        EOF
+    } always {
+        caught
+    } > >(indent)
 }
 
-function command_barnyard_ssh_private-key {
-    eval "$(barnyard_parse_arguments ssh_private-key v,version: h,help -- "$@")"
-
+function barnyard:ssh:private-key {
+    eval "$(args v,version f,file -b h,help -- "$@")"
     barnyard_version_check
-
-    (( $EUID == 0 )) || abend 'must be run as root'
-
-    (( $# )) || abend 'a file name is required'
-
-    typeset filename=${1:-} gpg_key
-    if [[ "$filename" = - ]]; then
-        filename=/dev/stdin
-    fi
-
-    rm -f /etc/barnyard/id_barnyard
-
-    umask 077
-    cat "$filename" > /etc/barnyard/id_barnyard
-
-    ssh-keygen -lf /etc/barnyard/id_barnyard
+    [[ -v o_file ]] || abend 'key file is required'
+    typeset file
+    banner 'set private SSH key'
+    {
+        { try show || tried 'must be run as root'; } <<'        EOF'
+            (( $EUID == 0 ))
+        EOF
+        if [[ $o_file = - ]]; then
+            { try show || tried; } <<'            EOF'
+                file=$(cat)
+            EOF
+        else
+            { try show -f $o_file || tried 'key file does not exist'; } <<'            EOF'
+                [[ -e %q ]]
+            EOF
+            { try show -f $o_file || tried; } <<'            EOF'
+                file=$(<%q)
+            EOF
+        fi
+        try show rm -f /etc/barnyard/id_barnyard || tried
+        { try show || tried; } <<'        EOF'
+            ( umask 077 && printf '%s\n' $file > /etc/barnyard/id_barnyard )
+        EOF
+        { try show || tried; } <<'        EOF'
+            ssh-keygen -lf /etc/barnyard/id_barnyard
+        EOF
+    } always {
+        caught
+    } > >(indent)
 }
 
-function command_barnyard_ssh {
-    eval "$(barnyard_parse_arguments ssh h,help -- "$@")"
-    barnyard_next_command barnyard_ssh "$@"
+function barnyard:ssh {
+    eval "$(args -b h,help -- "$@")"
+    delegate "$@"
 }
 
-function command_barnyard_version {
-    eval "$(barnyard_parse_arguments version h,help -- "$@")"
-    print -R "$VERSION"
+function barnyard:version {
+    eval "$(args -b h,help -- "$@")"
+    print $BARNYARD_VERSION
 }
 
-function command_barnyard_compile {
-    eval "$(options -s v,version d,date -- "$@")"
+# Unlike other utilities where you've done this, `barnyard` will only ever run
+# compiled unless you are doing development on a deployed machine. It does not
+# have to run on the client machine.
+function barnyard:compile {
+    eval "$(args -s v,version d,date -- "$@")"
     # TODO Regular expression checking.
     if [[ -v o_version ]]; then
         BARNYARD_VERSION=$o_version
@@ -1046,25 +1060,34 @@ function command_barnyard_compile {
     if [[ -v o_date ]]; then
         BARNYARD_RELEASE_DATE=$(TZ=UTC date --date=@$o_date +'%B %-d, %Y')
     fi
+    typeset strip='
+        /^function {$/{flag=1}
+        /^}/&&flag{flag=0;next}
+        !flag
+    '
     {
         if [[ -v BARNYARD_IS_COMPILED ]]; then
-            cat ${ZSH_ARGZERO:A}
+            print cat ${ZSH_ARGZERO:A}
         else
             typeset dir=${ZSH_ARGZERO:A:h:h}
             cat $dir/lib/barnyard/header.zsh
-            printf '\n\n___ barnyard_include ___\n\n'
-            cat $dir/lib/barnyard/heredoc.zsh
             printf '\n'
-            cat $dir/lib/barnyard/block.zsh
+            awk $strip $dir/lib/barnyard/parse.zsh
+            printf '\n\n___ barnyard_include ___\n\n'
+            awk $strip $dir/lib/barnyard/heredoc.zsh
+            printf '\n'
+            awk $strip $dir/lib/barnyard/block.zsh
             printf '\n\n___\n\n'
-            cat $dir/lib/barnyard/parse.zsh
+            awk $strip $dir/lib/barnyard/catch.zsh
+            printf '\n'
+            awk $strip $dir/lib/barnyard/splat.zsh
             printf '\n'
             cat $dir/bin/barnyard
         fi
     } | sed -e "$(
         printf 's/^BARNYARD_VERSION=.*$/BARNYARD_VERSION=%s/\n' $BARNYARD_VERSION
     )" -e "$(
-        printf 's/^BARNYARD_RELEASE_DATE=.*$/BARNYARD_RELEASE_DATE=%s/\n' $BARNYARD_RELEASE_DATE
+        printf 's/^BARNYARD_RELEASE_DATE=.*$/BARNYARD_RELEASE_DATE=%s/\n' ${(qqq)BARNYARD_RELEASE_DATE}
     )"
 }
 
@@ -1081,13 +1104,30 @@ function _barnyard_options_error {
     esac
 }
 
-function options {
-    parser _acrectl_options_error 2 "$@"
-    printf '(( $o_help )) && acrectl_usage %s' $funcstack[2]
+function barnyard_args_error {
+    print -u 2 -- "$@"
+    exit 1
 }
 
-function {
-    eval "$(barnyard_parse_arguments barnyard h,help -- "$@")"
+function args {
+    parser barnyard_args_error 3 "$@"
+    printf '(( $o_help )) && barnyard_usage %s' $funcstack[2]
+}
+
+function delegate {
+    typeset prefix=$funcstack[2]
+    (( $# )) || abend 'fatal: %s expects a command argument' ${prefix//:/ }
+    typeset delegate=$prefix:$1
+    shift
+    (( $BARNCTL_COMMANDS[(Ie)$delegate] )) || abend 'fatal: no such command `%s`.' ${delegate//:/ }
+    $delegate "$@"
+}
+
+function barnyard {
+    typeset -xg BARNCTL_COMMANDS=()
+    BARNCTL_COMMANDS=(
+        "${(@f)$(sed -n 's/^function *\(barnyard:[^:][^ ]*\) *{$/\1/p' ${ZSH_ARGZERO:a})}"
+    )
     typeset -A o_block
     typeset dir=${ZSH_ARGZERO:A:h:h}
     if [[ ! -v BARNYARD_IS_COMPILED ]]; then
@@ -1095,8 +1135,11 @@ function {
         source $dir/lib/barnyard/block.zsh
         source $dir/lib/barnyard/parse.zsh
     fi
-    barnyard_next_command barnyard "$@"
-} "$@"
+    eval "$(args -b h,help -- "$@")"
+    delegate "$@"
+}
+
+barnyard "$@"
 
 exit
 

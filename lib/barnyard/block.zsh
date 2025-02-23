@@ -124,7 +124,7 @@ function banner {
         if (( $# )); then
             typeset message
             printf -v message "$@"
-            printf '--- %s ---\n\n' $message >&$out
+            printf '%s:\n\n' $message >&$out
         else
             print -- >&$out
         fi
