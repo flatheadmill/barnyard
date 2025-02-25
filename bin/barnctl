@@ -455,52 +455,42 @@ function barnctl_command_apply {
 # server-side `barnyard` executable has commands to simplify  the construction
 # of the scripts here.
 
-function barnctl_command_bootstrap {
-    typeset -a o_gpg o_fingerprint
-    eval "$(barnctl_parse_arguments bootstrap h,help g,gpg@ f,fingerprint@ k,known: s,ssh: c,clone: -- "$@")"
-
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
-
-    typeset server=${1:-} slurp gpg fingerprint
-
+function barnctl:bootstrap {
+    eval "$(args h,hostname k,known s,ssh c,clone -a g,gpg -a f,fingerprint h,help -- "$@")"
+    [[ -v o_hostname || -n $o_hostname ]] || abend 'fatal: ssh hostname is required'
+    typeset slurp gpg fingerprint
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
     # line. So, we read our files into a varaible using `$(cat)` so that the
     # process substituion will strip all new lines. We know there are none so we
     # can add just one.
-
     {
         print 'set -e'
         if [[ -v o_known ]]; then
             slurp=$(cat "$o_known")
-            printf 'cat <<EOF | barnyard ssh known-hosts --version=%q - || exit 1\n' $VERSION
+            printf 'cat <<EOF | barnyard ssh known-hosts --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         fi
         if [[ -v o_ssh ]]; then
             slurp=$(cat "$o_ssh")
-            printf 'cat <<EOF | barnyard ssh private-key --version=%q - || exit 1\n' $VERSION
+            printf 'cat <<EOF | barnyard ssh private-key --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         fi
         for gpg in "${(@)o_gpg}"; do
             slurp=$(cat "$gpg")
-            printf 'cat <<EOF | barnyard gpg import --version=%q - || exit 1\n' $VERSION
+            printf 'cat <<EOF | barnyard gpg import --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         done
         for fingerprint in "${(@)o_fingerprint}"; do
-            printf 'barnyard gpg trust --version=%q %q || exit 1\n' $VERSION "$fingerprint"
+            printf 'barnyard gpg trust --version=%q --fingerprint %q || exit 1\n' $VERSION "$fingerprint"
         done
         if [[ -v o_clone ]]; then
-            printf 'barnyard clone --version=%q %q || exit 1\n' $VERSION "$o_clone"
+            printf 'barnyard clone --version=%q --repository %q || exit 1\n' $VERSION "$o_clone"
         fi
-        if (( ${#o_gpg} || ${#o_fingerprint} )); then
-            printf 'GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys\n'
-        fi
-    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_hostname" '/usr/bin/sudo /bin/bash'
 }
 
 function assert_barnyard_directory {
@@ -615,11 +605,11 @@ function barnctl_barnyard_source {
 
 function barnctl:prepare {
     eval "$(args h,hostname -b h,help -- "$@")"
-    [[ -v o_hostname ]] || abend 'fatal: ssh hostname is required'
+    [[ -v o_hostname || -n $o_hostname ]] || abend 'fatal: ssh hostname is required'
     {
         barnctl_barnyard_source
         barnctl_shell_resource barnctl_prepare
-    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_hostname" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 $o_hostname '/usr/bin/sudo /bin/bash'
 }
 
 function barnctl_command_upgrade {
@@ -678,18 +668,19 @@ exit
 # because the key never leaves the machine.
 
 ___ barnctl_prepare ___
-echo '--- apt ---'
-echo '$ apt-get update && apt-get install -y zsh gnupg2 git'
+echo bootstrap
+echo
 {
-    apt-get update && apt-get install -y zsh gnupg2 git
-} 2>&1 | sed 's/^/    /'
-echo '--- barnyard ---'
-echo '$ echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard'
-echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
-echo '$ chmod 755 /usr/local/bin/barnyard'
-chmod 755 /usr/local/bin/barnyard
-echo '$ barnyard version'
-barnyard version 2>&1 | sed 's/^/    /'
+    echo '$ apt-get update && apt-get install -y zsh gnupg2 git age'
+    apt-get update && apt-get install -y zsh gnupg2 git age
+    echo '$ echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard'
+    echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
+    echo '$ chmod 755 /usr/local/bin/barnyard'
+    chmod 755 /usr/local/bin/barnyard
+    echo '$ barnyard version'
+    barnyard version
+} 2>&1 | sed -u 's/^/    /'
+echo
 barnyard prepare
 ___ barnctl_upgrade ___
 if [[ -e /usr/local/bin/barnyard ]]; then

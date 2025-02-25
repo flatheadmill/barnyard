@@ -613,7 +613,7 @@ function barnyard_run_ {
 ___
 function barnyard_version_check {
     [[ -v o_version ]] && {
-        [[ "$o_version" = "$VERSION" ]] || abend "local=$o_version" remote=$VERSION 'version mismatch, please run upgrade'
+        [[ "$o_version" = "$BARNYARD_VERSION" ]] || abend "local=$o_version" remote=$BARNYARD_VERSION 'version mismatch, please run upgrade'
     }
 }
 
@@ -836,7 +836,7 @@ function command_barnyard_commit {
 }
 
 function barnyard:gpg:trust {
-    eval "$(args -p,fingerprint v,version -b h,help -- "$@")"
+    eval "$(args p,fingerprint v,version -b h,help -- "$@")"
     barnyard_version_check
     [[ -v o_fingerprint ]] || abend 'a GPG public key fingerprint is required'
     banner 'trust GPG fingerprint'
@@ -844,8 +844,11 @@ function barnyard:gpg:trust {
         { try show || tried 'must be run as root'; } <<'        EOF'
             (( $EUID == 0 ))
         EOF
-        { try show -f $fingerprint || tried; } <<'        EOF'
+        { try show -f $o_fingerprint || tried; } <<'        EOF'
             GNUPGHOME=/etc/barnyard/gnupg gpg --batch --yes --sign-key %q
+        EOF
+        { try show || tried; } <<'        EOF'
+            GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys
         EOF
     } always {
         caught
@@ -868,9 +871,7 @@ function barnyard:gpg:import {
             (( $EUID == 0 ))
         EOF
         if [[ $o_file = - ]]; then
-            { try show || tried; } <<'            EOF'
-                gpg_key=$(cat)
-            EOF
+            try show eval 'gpg_key=$(cat)' || tried
         else
             {
                 try show -f $o_file || tried 'gpg key file does not exist';
@@ -910,6 +911,7 @@ function barnyard:prepare {
         } > >(indent)
         banner 'age'
         {
+            try show mkdir -p /etc/barnyard || tried
             try show age --version || tried
             try show age-keygen --version || tried
             { try show || tried; } <<'            EOF'
@@ -978,9 +980,7 @@ function barnyard:ssh:known-hosts {
             (( $EUID == 0 ))
         EOF
         if [[ $o_file = - ]]; then
-            { try show || tried; } <<'            EOF'
-                known_hosts=$(cat)
-            EOF
+            try show eval 'known_hosts=$(cat)' || tried
         else
             {
                 try show -f $o_file || tried '"known_hosts" file does not exist';
@@ -1007,16 +1007,14 @@ function barnyard:ssh:private-key {
     eval "$(args v,version f,file -b h,help -- "$@")"
     barnyard_version_check
     [[ -v o_file ]] || abend 'key file is required'
-    typeset file
+    typeset key
     banner 'set private SSH key'
     {
         { try show || tried 'must be run as root'; } <<'        EOF'
             (( $EUID == 0 ))
         EOF
         if [[ $o_file = - ]]; then
-            { try show || tried; } <<'            EOF'
-                file=$(cat)
-            EOF
+            try show eval 'key=$(cat)' || tried
         else
             { try show -f $o_file || tried 'key file does not exist'; } <<'            EOF'
                 [[ -e %q ]]
@@ -1027,7 +1025,7 @@ function barnyard:ssh:private-key {
         fi
         try show rm -f /etc/barnyard/id_barnyard || tried
         { try show || tried; } <<'        EOF'
-            ( umask 077 && printf '%s\n' $file > /etc/barnyard/id_barnyard )
+            ( umask 077 && printf '%s\n' $key > /etc/barnyard/id_barnyard )
         EOF
         { try show || tried; } <<'        EOF'
             ssh-keygen -lf /etc/barnyard/id_barnyard
