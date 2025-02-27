@@ -664,6 +664,11 @@ function barnyard_apply {
             o_barnyard[archive]=$BARNYARD_TEMP/run
             barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf
             o_barnyard[code]=$(<$BARNYARD_TEMP/run/conf/code)
+            typeset -A o_machine
+            barnyard_read_config o_machine $BARNYARD_TEMP/run/conf/machines/$o_barnyard[hostname]/machine
+            if (( ${+o_machine[code]} )); then
+                o_barnyard[code]=$o_machine[code]
+            fi
             barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
 
             if (( $# )); then
