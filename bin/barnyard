@@ -1070,7 +1070,7 @@ function barnyard:compile {
     '
     {
         if [[ -v BARNYARD_IS_COMPILED ]]; then
-            print cat ${ZSH_ARGZERO:A}
+            cat ${ZSH_ARGZERO:A}
         else
             typeset dir=${ZSH_ARGZERO:A:h:h}
             cat $dir/lib/barnyard/header.zsh
