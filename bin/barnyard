@@ -834,7 +834,7 @@ function barnyard:clone {
 
 }
 
-function command_barnyard_commit {
+function barnyard:commit {
     eval "$(args v,version -b h,help -- "$@")"
     barnyard_version_check
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
