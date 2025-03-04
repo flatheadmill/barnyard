@@ -299,17 +299,22 @@ function barnyard_get_array_redux {
 }
 
 function barnyard_extract {
-    typeset branch=${1:-} destination=${2:-} seen=${3:-}
-    typeset sha1=$(git -C "${o_barnyard[repository]}" rev-parse "$branch")
-    #typeset sha1=$(git -C "${o_barnyard[repository]}" ls-remote origin "refs/heads/$branch" | awk '{ print $1 }')
-    while read -r sha1 good; do
-        if [[ -n "$o_ref" || $good = G ]]; then
+    typeset branch=${1:-} destination=${2:-} good
+    good=$(git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch) ||
+        abend 'git log unable to verify signature'
+    typeset skip=0
+    case $o_ref-$good-$skip in
+        -G-0 | *-*-* )
             mkdir -p $destination
-            git -C "$o_barnyard[repository]" archive $sha1 | tar -C "$destination" -x
-            return
-        fi
-    done < <(git -C "${o_barnyard[repository]}" log --format='%H %G?' $sha1)
-    abend 'no valid signature'
+            function {
+                setopt localoptions pipefail
+                git -C "$o_barnyard[repository]" archive $branch | tar -C "$destination" -x
+            } || abend 'unable to extract %s' ${(qqq)branch}
+            ;;
+        * )
+            abend 'invalid signature'
+            ;;
+    esac
 }
 
 function barnyard_read_config_ {
