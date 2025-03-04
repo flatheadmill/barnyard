@@ -302,9 +302,8 @@ function barnyard_extract {
     typeset branch=${1:-} destination=${2:-} good
     good=$(git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch) ||
         abend 'git log unable to verify signature'
-    typeset skip=0
-    case $o_ref-$good-$skip in
-        -G-0 | *-*-* )
+    case $o_ref-$good-$o_check_signature in
+        -G-0 | *?-*-1 | -*-0 )
             mkdir -p $destination
             function {
                 setopt localoptions pipefail
@@ -710,14 +709,16 @@ function barnyard_apply {
 
 function barnyard:always {
     typeset o_repository=/var/lib/barnyard/repository
-    eval "$(args v,version -d r,repository -b q,quiet h,help f,fetch -- "$@")"
+    integer o_check_signature=1
+    eval "$(args -@ v,version -d r,repository -b q,quiet h,help f,fetch -d! c,check-signature -- "$@")"
     typeset -A o_barnyard=( always yes repository ${o_repository:A} fetch $o_fetch )
     barnyard_apply "$@"
 }
 
 function barnyard:apply {
     typeset o_repository=/var/lib/barnyard/repository
-    eval "$(args v,version R,ref -d r,repository -b d,dry-run q,quiet h,help -- "$@")"
+    integer o_check_signature=1
+    eval "$(args -@ v,version R,ref -d r,repository -b d,dry-run q,quiet h,help -d! c,check-signature -- "$@")"
     [[ -v o_ref && $o_dry_run = 0 ]] && abend 'cannot specify ref except for dry-run'
     (( $# )) && abend 'barnyard apply takes no positional arguments'
     typeset -A o_barnyard=( always no repository "${o_repository:A}" dry_run $o_dry_run fetch 1 )
