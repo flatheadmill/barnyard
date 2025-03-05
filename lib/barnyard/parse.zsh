@@ -126,7 +126,7 @@ function parser {
                     case $popped in
                         (#b)--no-([^=]##) )
                             flag=$match[1]
-                            stack[$top]=$match[1]
+                            ((top--))
                             ;;
                         (#b)--([^=]##)=(*) )
                             flag=$match[1]

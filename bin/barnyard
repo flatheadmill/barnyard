@@ -638,6 +638,7 @@ function barnyard_order_modules {
 }
 
 function barnyard_apply {
+    typeset module
     export BARNYARD_TEMP
     BARNYARD_TEMP=$(mktemp -d) || abend 'unable to create temporary directory'
     {
@@ -676,7 +677,9 @@ function barnyard_apply {
             barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
 
             if (( $# )); then
-                barnyard_run_ "$@"
+                for module in "$@"; do
+                    barnyard_run_ $module || exit 1
+                done
             else
                 [[ "$o_barnyard[always]" = no ]] || abend 'always requires specific modules to run'
                 typeset -a modules
@@ -700,7 +703,9 @@ function barnyard_apply {
             mkdir -p "$BARNYARD_TEMP/run"
             cp -R "$o_barnyard[repository]"/* "$BARNYARD_TEMP/run"
             o_barnyard[repository]="$o_barnyard[repository]/conf"
-            barnyard_run_ "$@"
+            for module in "$@"; do
+                barnyard_run_ $module || exit 1
+            done
         fi
     } always {
         [[ -n "$BARNYARD_TEMP" && -d "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
@@ -1120,7 +1125,7 @@ function barnyard_args_error {
 
 function args {
     parser barnyard_args_error 3 "$@"
-    printf '(( $o_help )) && barnyard_usage %s' $funcstack[2]
+    printf '(( $o_help )) && barnyard_usage %s\n' $funcstack[2]
 }
 
 function delegate {
