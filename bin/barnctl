@@ -234,8 +234,8 @@ function barnctl_command_apply {
 # of the scripts here.
 
 function barnctl:bootstrap {
-    eval "$(args h,hostname k,known s,ssh c,clone -a g,gpg -a f,fingerprint h,help -- "$@")"
-    [[ -v o_hostname || -n $o_hostname ]] || abend 'fatal: ssh hostname is required'
+    eval "$(args u,uri k,known s,ssh c,clone -a g,gpg -a f,fingerprint h,help -- "$@")"
+    [[ -v o_uri || -n $o_uri ]] || abend 'fatal: ssh hostname is required'
     typeset slurp gpg fingerprint
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
@@ -268,7 +268,7 @@ function barnctl:bootstrap {
         if [[ -v o_clone ]]; then
             printf 'barnyard clone --version=%q --repository %q || exit 1\n' $VERSION "$o_clone"
         fi
-    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_hostname" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" '/usr/bin/sudo /bin/bash'
 }
 
 function assert_barnyard_directory {
