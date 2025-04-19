@@ -302,8 +302,8 @@ function barnyard_extract {
     typeset branch=${1:-} destination=${2:-} good
     good=$(git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch) ||
         abend 'git log unable to verify signature'
-    case $o_ref-$good-$o_check_signature in
-        -G-0 | *?-*-1 | -*-0 )
+    case $good-$o_check_signature in
+        G-1 | *-0 )
             mkdir -p $destination
             function {
                 setopt localoptions pipefail
