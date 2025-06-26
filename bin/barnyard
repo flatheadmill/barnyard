@@ -300,14 +300,15 @@ function barnyard_get_array_redux {
 
 function barnyard_extract {
     typeset branch=${1:-} destination=${2:-} good
-    good=$(git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch) ||
-        abend 'git log unable to verify signature'
+    good=$(
+        git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' "remotes/origin/$branch"
+    ) || abend 'git log unable to verify signature'
     case $good-${o_check_signature:-1} in
         G-1 | *-0 )
             mkdir -p $destination
             function {
                 setopt localoptions pipefail
-                git -C "$o_barnyard[repository]" archive $branch | tar -C "$destination" -x
+                git -C "$o_barnyard[repository]" archive "remotes/origin/$branch" | tar -C "$destination" -x
             } || abend 'unable to extract %s' ${(qqq)branch}
             ;;
         * )
