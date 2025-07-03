@@ -352,7 +352,7 @@ function barnyard_read_config {
     : ${(PA)${1:-reply}::=${(@kv)barnyard_read_config}}
 }
 
-function abend {
+function panic {
     log priority=err "$@"
     exit 1
 }
