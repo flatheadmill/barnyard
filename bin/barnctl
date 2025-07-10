@@ -331,7 +331,6 @@ function barnctl:configure {
                 o_module[_module]=${module:t}
             fi
             if [[ -e ../code/modules/$o_module[_module]/configure.zsh ]]; then
-                print here
                 zsh <(barnctl_shell_resource barnctl_configure) \
                     $SCRIPT_DIR $PWD $machine $o_module[_module] ${module:t} configure ||
                         abend 'configure module %s failed' ${(qqq)module}
