@@ -600,15 +600,18 @@ function barnyard_run_ {
     zsh "$BARNYARD_TEMP/apply" "${args[@]}"
     code=$?
 
-    if (( $code )); then
+    if (( code == 2 )); then
+        log module="$module" "skipping module %s" "$module"
+        return
+    elif (( code )); then
         log err code=$code module="$module" 'module %s exited %d' "$module" $code
         return $code
     fi
 
     if [[
-        "$o_barnyard[repository]" = /var/lib/barnyard/repository && \
-        "$program" = apply.zsh && \
-        "$o_barnyard[always]" = no \
+        "$o_barnyard[repository]" = /var/lib/barnyard/repository &&
+        "$program" = apply.zsh &&
+        "$o_barnyard[always]" = no
     ]]; then
         mkdir -p /var/lib/barnyard/applied
         log module="$module" "marking module %s as applied" "$module"
