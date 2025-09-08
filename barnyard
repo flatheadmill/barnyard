@@ -676,7 +676,7 @@ function barnyard_apply {
         barnyard_version_check
 
         [[ -e /etc/barnyard/config ]] || abend 'barnyard not installed'
-        barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(hostname --long)" quiet $o_quiet "${(@kv)o_barnyard}"
+        barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(< /etc/hostname)" quiet $o_quiet "${(@kv)o_barnyard}"
 
         [[ -v o_ref ]] && o_barnyard[branch]=$o_ref
 
