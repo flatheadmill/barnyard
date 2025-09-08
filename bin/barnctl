@@ -1,33 +1,10 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env zshctl
 
 VERSION=0.25.0
 
-SCRIPT_DIR=${${ZSH_ARGZERO:A}%/*}
+SCRIPT_DIR=${${zshctl[argzero]:A}%/*}
 
 function ___ {
-}
-
-function barnctl_args_error {
-    print -u 2 -- "$@"
-    exit 1
-}
-
-function args {
-    parser barnctl_args_error 3 "$@"
-}
-
-function barnctl_next_command {
-    typeset prefix=$1 command=$2
-    shift 2
-    for func in "${BARNCTL_COMMANDS[@]}"; do
-        if [[ "$func" == "$prefix$command" ]]; then
-            "barnctl_command_$func" "$@"
-            return
-        fi
-    done
-    abend <<'    EOF'
-        error: no such command \`barnctl ${prefix:gs/_/ }$command\`
-    EOF
 }
 
 ___ barnctl_common ___
@@ -233,7 +210,7 @@ function barnctl_command_apply {
 # server-side `barnyard` executable has commands to simplify  the construction
 # of the scripts here.
 
-function barnctl:bootstrap {
+function execute:bootstrap {
     eval "$(args u,uri k,known s,ssh c,clone -a g,gpg -a f,fingerprint h,help -- "$@")"
     [[ -v o_uri || -n $o_uri ]] || abend 'fatal: ssh hostname is required'
     typeset slurp gpg fingerprint
@@ -277,7 +254,7 @@ function assert_barnyard_directory {
     EOF
 }
 
-function barnctl:commit {
+function execute:commit {
     eval "$(args u,uri -b h,help -- "$@")"
     assert_barnyard_directory
     [[ -v o_uri ]] || abend 'an ssh URI or destination is required'
@@ -317,7 +294,7 @@ function configure_or_unconfigure {
     done
 }
 
-function barnctl:configure {
+function execute:configure {
     typeset o_include='*' machine module
     eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
     typeset -A o_module
@@ -344,7 +321,7 @@ function barnctl_command_unconfigure {
     configure_or_unconfigure unconfigure "$@"
 }
 
-function barnctl:generate {
+function execute:generate {
     typeset o_include='*'
     eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
     typeset configuration generate now=$(date +%s)
@@ -359,7 +336,7 @@ function barnctl:generate {
     done
 }
 
-function barnctl:inventory {
+function execute:inventory {
     typeset o_include='*'
     eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
     typeset inventory configuration
@@ -375,7 +352,7 @@ function barnctl:inventory {
 }
 
 function barnctl_barnyard_source {
-    typeset barnyard=$($BARNCTL_DIR/bin/barnyard compile --version $VERSION)
+    typeset barnyard=$($BARNCTL_DIR/barnyard compile --version $VERSION)
     heredoc -f $barnyard <<'    EOF'
         set -e
         BARNYARD_SOURCE=$(cat <<'EOS'
@@ -385,7 +362,7 @@ function barnctl_barnyard_source {
     EOF
 }
 
-function barnctl:prepare {
+function execute:prepare {
     eval "$(args u,uri -b h,help -- "$@")"
     [[ -v o_uri || -n $o_uri ]] || abend 'fatal: an ssh destination or URI is required'
     {
@@ -414,36 +391,19 @@ function barnctl_command_upgrade {
     } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
 
-function barnctl:version {
+function execute:version {
     eval "$(args -b h,help -- "$@")"
     print $VERSION
 }
 
-# Invoke the next sub-command from the extracted commands. The prefix is the
-# underbar delimited path of commands visited so far.
-function delegate {
-    typeset prefix=$funcstack[2]
-    (( $# )) || abend 'fatal: %s expects a command argument' ${prefix//:/ }
-    typeset delegate=$prefix:$1
-    shift
-    (( $BARNCTL_COMMANDS[(Ie)$delegate] )) || abend 'fatal: no such command `%s`.' ${delegate//:/ }
-    $delegate "$@"
-}
-
-function barnctl {
-    typeset BARNCTL_DIR=${ZSH_ARGZERO:A:h:h}
-    typeset -gx BARNCTL_COMMANDS=( "${(@f)$(sed -n 's/^function *\(barnctl:[^:][^ ]*\) *{$/\1/p' $BARNCTL_DIR/bin/barnctl)}" )
-    source $BARNCTL_DIR/lib/barnyard/parse.zsh
-    source $BARNCTL_DIR/lib/barnyard/heredoc.zsh
-    source $BARNCTL_DIR/lib/barnyard/block.zsh
-    source $BARNCTL_DIR/lib/barnyard/splat.zsh
-    eval "$(args -b h,help -- "$@")"
+function execute {
+    typeset BARNCTL_DIR=${zshctl[argzero]:A:h}
+    include parse heredoc block splat
+    eval "$(args -UC -bx h,help -- "$@")"
     delegate "$@"
 }
 
-barnctl "$@"
-
-exit
+return
 
 # Any keys specific to the machine permanent and are never updated. If a key
 # specific to the machine is compromised, it means the machine is compromised,
@@ -664,3 +624,5 @@ function {
     source "$o_barnyard[configuration]"
 } "$@"
 ___
+
+# vim: ft=zsh :
