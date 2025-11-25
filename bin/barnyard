@@ -444,7 +444,12 @@ function :args:always {
 }
 
 function :execute:always {
-    typeset -A o_barnyard=( always yes repository ${o_repository:A} fetch $o_fetch )
+    typeset -A o_barnyard=(
+        always yes
+        repository ${o_repository:A}
+        fetch $o_fetch
+        limit $(( 16#7fffffffffffffff ))
+    )
     :barnyard:apply "$@"
 }
 
