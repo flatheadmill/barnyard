@@ -1,4 +1,6 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env zshctl
+
+zshctl[man_title]='Barnyard Manuals'
 
 # For the readme...
 #
@@ -28,229 +30,6 @@ export BARNYARD_PATH=${${0:a}%/*}
 BARNYARD_VERSION=0.0.0
 BARNYARD_RELEASE_DATE='January 1, 1970'
 
-function zsh_parse_arguments {
-    typeset error=${${1:-}:q} context=${${2:-}:q}
-    shift 2
-
-    # TODO -hfoo will become $o_help and then set -- foo
-    typeset -A arguments declared localized arg
-    typeset regex short long remainder
-
-    while :
-    do
-        case "$1" in
-            # Indicates send of parser arguments.
-            -- )
-                shift
-                break
-                ;;
-            # Parse program arguments.
-            * )
-                # Check for a variable name or else we'll generate an `o_` prefixed one.
-                if [[ "$1" =~ ^([^,]+)=(.*)$ ]]; then
-                    arg[variable]="$match[1]"
-                    pattern="$match[2]"
-                else
-                    arg[variable]=
-                    pattern="$1"
-                fi
-
-                shift
-
-                regex='^([a-zA-Z0-9]{0,2}),([^%@:#!]*)([%@:#!]?)(.*)$'
-                [[ "$pattern" =~ $regex ]] || { printf '%s definition %q' $error "$1"; return; }
-                short=${match[1]} long=${match[2]} arg[kind]=${match[3]} arg[remainder]="${match[4]}"
-
-                [[ -z "$arg[variable]" ]] && {
-                    [[ -z "$long" ]] && arg[variable]=o_$short || arg[variable]=o_${long:gs/-/_/}
-                }
-
-                case "x$arg[kind]" in
-                    x@ )
-                        arg[type_flag]=' -a'
-                        arg[type_name]='array-local'
-                        ;;
-                    x% )
-                        arg[type_flag]=' -A'
-                        arg[type_name]='association-local'
-                        [[ -z "$arg[remainder]" ]] && arg[remainder]==
-                        ;;
-                    * )
-                        arg[type_flag]=' '
-                        arg[type_name]='scalar-local'
-                        ;;
-                esac
-
-                [[ -n "$long" ]] && arguments[--${long}]="${(@qq)${(@kv)arg}}"
-                [[ -n "$short" ]] && arguments[-${short}]="${(@qq)${(@kv)arg}}"
-
-                [[ "declared[$arg[variable]]" = 1 ]] && continue
-                case x"$arg[kind]" in
-                    x | x\! | x\# )
-                        printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != "scalar-local" ]] } && local %s\n' \
-                            "$arg[variable]" "$arg[variable]" "$arg[variable]"
-                        case "x$arg[kind]" in
-                            x | x\# )
-                                printf '%s=0\n' "$arg[variable]"
-                                ;;
-                            * )
-                                printf '%s=1\n' "$arg[variable]"
-                                ;;
-                        esac
-                        ;;
-                esac
-                declared[$arg[variable]]=1
-                ;;
-        esac
-    done
-
-    typeset -a args=( "$@" ) split
-    typeset i=1 arged flag negated delimiter
-    while (( i <= ${#args[@]} )); do
-        negated=0
-        case "${args[$i]}" in
-            - )
-                break
-                ;;
-            -- )
-                let i=i+1
-                break
-                ;;
-            --no-* )
-                regex='^--no-([a-zA-Z0-9][-a-zA-Z0-9]*)$'
-                if [[ "${args[$i]}" =~ $regex ]] && [[ -n "${arguments[--$match[1]]}" ]]; then
-                    arg=( "${(@Q)${(@z)${arguments[--$match[1]]}}}" )
-                    if [[ $arg[kind] == '!' ]]; then
-                        args[$i]="--${match[1]}"
-                        negated=1
-                    fi
-                fi
-                ;&
-            --* )
-                arged=0
-                regex='^(--[-a-zA-Z0-9]+)(=.*)?$'
-                [[ "${args[$i]}" =~ $regex ]] || { printf '%s unknown %s %q\n' $error $context "$1"; return; }
-                long="${match[1]}"
-                if [[ "$match[2]" != '' ]]; then
-                    arged=1
-                    args[i]=${match[2]:1}
-                else
-                    ((i++))
-                fi
-                flag=$long
-                [[ -z "${arguments[$long]}" ]] && { printf '%s unknown %s %q\n' $error $context "$long"; return; }
-                arg=( "${(@Q)${(@z)${arguments[$long]}}}" )
-                ;;
-            -* )
-                arged=0
-                # NB Oh, it's one or for an array, but for strings we start from zero. I see.
-                flag=${args[$i]:0:2}
-                [[ -z "${arguments[$flag]}" ]] && { printf '%s unknown %s %q\n' $error $context "$flag"; return; }
-                arg=( "${(@Q)${(@z)${arguments[$flag]}}}" )
-                case "x$arg[kind]" in
-                    x: | x@ )
-                        if [[ ${#args[$i]} -eq 2 ]]; then
-                            let i=i+1
-                        else
-                            args[i]=${args[$i]:2}
-                        fi
-                        ;;
-                    * )
-                        # TODO If you have args a b and c and you get -abd what
-                        # does getopt do? Seems to just append...
-                        if [[ ${#args[i]} -gt 2 ]]; then
-                            args[i]="-${args[i]:2}"
-                        else
-                            ((i++))
-                        fi
-                        [[ "$arg[kind]" = '!' ]] && negated=1
-                        ;;
-                esac
-                ;;
-            *)
-                break
-                ;;
-        esac
-        case "x$arg[kind]" in
-            x | x\# | x\! )
-                (( $arged )) && { printf '%s no_args %s %q\n' $error $context "$flag"; return; }
-                ;;
-        esac
-        case "x$arg[kind]" in
-            x )
-                printf 'local %s=1\n' "$arg[variable]"
-                ;;
-            x\# )
-                printf '((%s++))\n' "$arg[variable]"
-                ;;
-            x\! )
-                if (( $negated )); then
-                    printf '%s=0\n' "$arg[variable]"
-                else
-                    printf '%s=1\n' "$arg[variable]"
-                fi
-                ;;
-            * )
-                (( i <= ${#args[@]} )) || { printf '%s arg_missing %s %q\n' $error $context "$flag"; return; }
-                if [[ "$localized[$arg[variable]]" != 1 ]]; then
-                    printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != %s ]] } && typeset%s %s\n' \
-                        "$arg[variable]" "$arg[variable]" \
-                        "$arg[type_name]" "$arg[type_flag]" "$arg[variable]"
-                fi
-                case "x$arg[kind]" in
-                    x: )
-                        printf '%s=%s\n' "$arg[variable]" "${args[$i]:q}"
-                        ((i++))
-                        ;;
-                    * )
-                        [[ "$localized[$arg[variable]]" != 1 ]] && printf '%s=()\n' "$arg[variable]"
-                        case "x$arg[kind]" in
-                            x@ )
-                                printf '%s+=(%s)\n' "$arg[variable]" "${args[$i]:q}"
-                                ((i++))
-                                ;;
-                            x% )
-                                delimiter=$arg[remainder]
-                                split=("${(@ps:$delimiter:)args[2]}")
-                                if (( ${#split[@]} == 1 )); then
-                                    (( i + 1 <= ${#args[@]} )) || {
-                                        print -R "$error $context arg_missing ${flag:q}"; return;
-                                    }
-                                    printf '%s+=(%s %s)\n' "$arg[variable]" "${args[$i]:q}" "${args[$i+1]:q}"
-                                    ((i+=2))
-                                else
-                                    printf '%s+=(%s %s)\n' "$arg[variable]" \
-                                        "${split[1]:q}" "${(pj:$delimiter:)${(@)split[2,-1]}}"
-                                    ((i++))
-                                fi
-                                ;;
-                        esac
-                        ;;
-                esac
-                localized[$arg[variable]]=1
-                ;;
-            * )
-        esac
-    done
-
-    (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@qq)${(@)args[$i,-1]}}}"
-}
-
-function barnyard_argument_error {
-    typeset cmd=${1:-} kind=${2:-}
-    shift 2
-    cmd=${${cmd/#root/barnyard}//_/ }
-    case "$kind" in
-        arg_missing )
-            abend 'missing argument `%s` to `%s`' "$1" "$cmd"
-            ;;
-        * )
-            print -u 2 -R -- "$cmd" "$kind" "$@"
-            ;;
-    esac
-    exit 1
-}
-
 ___ barnyard_common ___
 typeset -A PRIORITY
 
@@ -271,10 +50,6 @@ fi
 
 # An environment variable so someone can set this in their shell.
 export BARNYARD_LOG_LEVEL
-
-function barnyard_string_resource {
-    awk '/^___ '$1' ___/{flag=1;next}/^___/{flag=0}flag' "$BARNYARD_PATH/barnyard"
-}
 
 function barnyard_write_config {
     typeset map=${1:-} file=${2:-}
@@ -299,6 +74,7 @@ function barnyard_get_array_redux {
 }
 
 function barnyard_extract {
+    setopt localoptions pipefail
     typeset branch=${1:-} destination=${2:-} good
     good=$(
         git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch
@@ -306,8 +82,7 @@ function barnyard_extract {
     case $good-${o_check_signature:-1} in
         G-1 | *-0 )
             mkdir -p $destination
-            function {
-                setopt localoptions pipefail
+            {
                 git -C "$o_barnyard[repository]" archive $branch | tar -C "$destination" -x
             } || abend 'unable to extract %s' ${(qqq)branch}
             ;;
@@ -345,6 +120,7 @@ function barnyard_read_config_ {
     done < "$file"
 }
 
+# TODO Tuck result into `o_barnyard`.
 function barnyard_read_config {
     [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
     typeset -A barnyard_read_config
@@ -468,63 +244,7 @@ function log {
     fi
 }
 
-function barnyard_display {
-    if [[ -z "$o_barnyard[quiet]" ]]; then
-        cat /dev/stdin 2>&1
-    else
-        cat /dev/stdin > /dev/null
-    fi
-}
-
-function barnyard_divider {
-    (( $o_barnyard[quiet] )) && return
-    typeset label="$1"
-    typeset bar=--------------------------------------------------------------------------------
-    shift
-    typeset prefix="------- $label "
-    print -R "$bar"
-    print -R "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
-    print -R "$bar"
-}
-
-function barnyard_heredoc {
-    typeset __barnyard_heredoc__chomped__=()
-    if (( $# )); then
-        __barnyard_heredoc__chomped__+=( -v "$1" )
-    fi
-    __barnyard_heredoc__chomped__+=( '%s' )
-    function {
-        typeset spaces=65536 leading='^( *)([^[:space:]])' IFS='' line lines=() chomped=()
-        while read -r line; do
-            lines+=( "$line" )
-            if [[ "$line" =~ $leading && "${#match[1]}" -lt "$spaces" ]]; then
-                spaces="${#match[1]}"
-            fi
-        done
-        for line in "${(@)lines}"; do
-            chomped+=( "${line[spaces + 1,-1]}" )
-        done
-        __barnyard_heredoc__chomped__+=( "${(pj:\n:)chomped}" )
-    }
-    printf "${(@)__barnyard_heredoc__chomped__}"
-}
-
-function barnyard_quotedoc {
-    if (( $# )); then
-        IFS= read -rd '' "$1" < <(barnyard_quotedoc)
-        : ${(P)1::=${${(P)1}%[[:space:]]}}
-    else
-        typeset heredoc
-        barnyard_heredoc heredoc
-        eval "$({
-            print 'cat <<EOF'
-            printf '%s\n' "$heredoc"
-            print EOF
-        })"
-    fi
-}
-
-function barnyard_run_ {
+function :barnyard:run {
     typeset -A o_module barnyard
     typeset module program code applied=() diffs=() args=()
 
@@ -590,14 +310,13 @@ function barnyard_run_ {
             ;;
     esac
 
-    (( barnyard[dry_run] )) && return
+    (( barnyard[dry_run] || ! o_barnyard[limit] )) && return
 
     barnyard[module]="$module"
     barnyard[source]="${barnyard[archive]}/code/modules/$o_module[_module]/$program"
-    export __BARNYARD_O_BARNYARD__="${(@qq)${(@kv)barnyard}}"
-    export __BARNYARD_O_MODULE__="${(@qq)${(@kv)o_module}}"
-    barnyard_string_resource barnyard_apply > "$BARNYARD_TEMP/apply"
-    zsh "$BARNYARD_TEMP/apply" "${args[@]}"
+    barnyard module \
+        --barnyard ${(j: :)${(@qq)${(@kv)barnyard}}} \
+        --module ${(j: :)${(@qq)${(@kv)o_module}}}
     code=$?
 
     if (( code == 2 )); then
@@ -617,6 +336,8 @@ function barnyard_run_ {
         log module="$module" "marking module %s as applied" "$module"
         git -C "$o_barnyard[repository]" log -n 1 --format='%H %at' "$barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
     fi
+
+    (( --o_barnyard[limit] ))
 }
 ___
 function barnyard_version_check {
@@ -625,7 +346,7 @@ function barnyard_version_check {
     }
 }
 
-function barnyard_order_modules {
+function :barnyard:order:modules {
     mkdir -p "/var/lib/barnyard/sha1"
     typeset -A ordered o_module o_program o_order
     typeset -a unordered ordered
@@ -637,11 +358,11 @@ function barnyard_order_modules {
     log info modules="${(j: :)ordered[@]}" 'running modules in order'
 
     for module in "${(@)ordered}"; do
-        barnyard_run_ "$module" || return 1
+        :barnyard:run "$module" || return 1
     done
 }
 
-function barnyard_apply {
+function :barnyard:apply {
     typeset module
     export BARNYARD_TEMP
     BARNYARD_TEMP=$(mktemp -d) || abend 'unable to create temporary directory'
@@ -682,13 +403,13 @@ function barnyard_apply {
 
             if (( $# )); then
                 for module in "$@"; do
-                    barnyard_run_ $module || exit 1
+                    :barnyard:run $module || exit 1
                 done
             else
                 [[ "$o_barnyard[always]" = no ]] || abend 'always requires specific modules to run'
                 typeset -a modules
                 modules=("${(@f)$(ls "${o_barnyard[archive]}/conf/machines/${o_barnyard[hostname]}")}")
-                barnyard_order_modules "${modules[@]}"
+                :barnyard:order:modules "${modules[@]}"
             fi
         else
             [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
@@ -708,30 +429,43 @@ function barnyard_apply {
             cp -R "$o_barnyard[repository]"/* "$BARNYARD_TEMP/run"
             o_barnyard[repository]="$o_barnyard[repository]/conf"
             for module in "$@"; do
-                barnyard_run_ $module || exit 1
+                :barnyard:run $module || exit 1
             done
         fi
     } always {
-        [[ -n "$BARNYARD_TEMP" && -d "$BARNYARD_TEMP" ]] && rm -rf "$BARNYARD_TEMP"
+        [[ -d $BARNYARD_TEMP ]] && rm -rf $BARNYARD_TEMP
     }
 }
 
-function barnyard:always {
+function :args:always {
     typeset o_repository=/var/lib/barnyard/repository
     integer o_check_signature=1
     eval "$(args -@ v,version -d r,repository -b q,quiet h,help f,fetch -d! c,check-signature -- "$@")"
-    typeset -A o_barnyard=( always yes repository ${o_repository:A} fetch $o_fetch )
-    barnyard_apply "$@"
 }
 
-function barnyard:apply {
+function :execute:always {
+    typeset -A o_barnyard=( always yes repository ${o_repository:A} fetch $o_fetch )
+    :barnyard:apply "$@"
+}
+
+function :args:apply {
     typeset o_repository=/var/lib/barnyard/repository
     integer o_check_signature=1
-    eval "$(args -@ v,version R,ref -d r,repository -b d,dry-run q,quiet h,help -d! c,check-signature -- "$@")"
+    integer o_limit=$(( 16#7fffffffffffffff ))
+    eval "$(args -@ -d l,limit v,version R,ref -d r,repository -b d,dry-run q,quiet h,help -d! c,check-signature -- "$@")"
+}
+
+function :execute:apply {
     [[ -v o_ref && $o_dry_run = 0 ]] && abend 'cannot specify ref except for dry-run'
     (( $# )) && abend 'barnyard apply takes no positional arguments'
-    typeset -A o_barnyard=( always no repository "${o_repository:A}" dry_run $o_dry_run fetch 1 )
-    barnyard_apply "$@"
+    typeset -A o_barnyard=(
+        always no
+        repository "${o_repository:A}"
+        dry_run $o_dry_run
+        fetch 1
+        limit $o_limit
+    )
+    :barnyard:apply "$@"
 }
 
 function barnyard_systemd {
@@ -826,27 +560,21 @@ function barnyard:clone {
     [[ -v o_repository ]] || abend 'a git repository url is required'
     banner 'clone'
     {
-        { try show || tried 'no barnyard ssh key'; } <<'        EOF'
-            [[ -e /etc/barnyard/id_barnyard ]]
-        EOF
-        { try show || tried 'no barnyard "known_hosts" file'; } <<'        EOF'
-            [[ -e /etc/barnyard/known_hosts ]]
-        EOF
-        { try show || tried; } <<'        EOF'
-            export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
-        EOF
-        try show rm -rf /var/lib/barnyard/repository || tried
-        { try show -f "${o_repository%#*}" || tried; } <<'        EOF'
+        (){ [[ -e /etc/barnyard/id_barnyard ]] }
+        (){ [[ -e /etc/barnyard/known_hosts ]] }
+        (){ export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts' }
+        (){ rm -rf /var/lib/barnyard/repository }
+        (){
+            % "${o_repository%#*}"
             git clone --mirror %q /var/lib/barnyard/repository
-        EOF
-        { try show -f "${o_repository##*#}" || tried; } <<'        EOF'
-            printf 'branch=%s\\n' > /etc/barnyard/config
-        EOF
+        }
+        (){
+            % "${o_repository##*#}"
+            printf 'branch=%%s\n' %q > /etc/barnyard/config
+        }
     } always {
         caught
     } > >(indent)
-    exit
-
 }
 
 function barnyard:commit {
@@ -861,15 +589,12 @@ function barnyard:gpg:trust {
     [[ -v o_fingerprint ]] || abend 'a GPG public key fingerprint is required'
     banner 'trust GPG fingerprint'
     {
-        { try show || tried 'must be run as root'; } <<'        EOF'
-            (( $EUID == 0 ))
-        EOF
-        { try show -f $o_fingerprint || tried; } <<'        EOF'
+        (){ (( $EUID == 0 )) }
+        (){
+            % $o_fingerprint
             GNUPGHOME=/etc/barnyard/gnupg gpg --batch --yes --sign-key %q
-        EOF
-        { try show || tried; } <<'        EOF'
-            GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys
-        EOF
+        }
+        (){ GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys }
     } always {
         caught
     } > >(indent)
@@ -887,27 +612,15 @@ function barnyard:gpg:import {
     typeset gpg_key
     banner 'add GPG signing key'
     {
-        { try show || tried 'must be run as root'; } <<'        EOF'
-            (( $EUID == 0 ))
-        EOF
+        (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then
-            try show eval 'gpg_key=$(cat)' || tried
+            (){ gpg_key=$(cat) }
         else
-            {
-                try show -f $o_file || tried 'gpg key file does not exist';
-            } <<'            EOF'
-                [[ -e %q ]]
-            EOF
-            { try show -f $o_file || tried; } <<'            EOF'
-                gpg_key=$(<%q)
-            EOF
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; gpg_key=$(<%q) }
         fi
-        { try show || tried; } <<'        EOF'
-            GNUPGHOME=/etc/barnyard/gnupg gpg --import <(printf %s "$gpg_key")
-        EOF
-        { try show || tried; } <<'        EOF'
-            GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys
-        EOF
+        (){ GNUPGHOME=/etc/barnyard/gnupg gpg --import <(printf %s "$gpg_key") }
+        (){ GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys }
     } always {
         caught
     } > >(indent)
@@ -918,64 +631,67 @@ function barnyard:gpg {
     delegate "$@"
 }
 
-function barnyard:prepare {
+function :args:prepare {
     eval "$(args h,help -- "$@")"
+}
+
+function :execute:prepare {
     typeset tmp; tmp=$(mktemp -d)
     {
         pushd $tmp
         banner 'git'
         {
-            try show git --version || tried
+            (){ git --version }
         } always {
             caught
         } > >(indent)
         banner 'age'
         {
-            try show mkdir -p /etc/barnyard || tried
-            try show age --version || tried
-            try show age-keygen --version || tried
-            { try show || tried; } <<'            EOF'
+            (){ mkdir -p /etc/barnyard }
+            (){ age --version }
+            (){ age-keygen --version }
+            (){
                 [[ -e /etc/barnyard/age ]] || age-keygen -o /etc/barnyard/age
-            EOF
-            try show mkdir -p /var/lib/barnyard/commit/age || tried
-            { try show || tried; } <<'            EOF'
-                grep '^# public key: ' /etc/barnyard/age |
-                    sed 's/# public key: //' |
-                    tee /var/lib/barnyard/commit/age/$(hostname --long)
-            EOF
+            }
+            (){ mkdir -p /var/lib/barnyard/commit/age }
+            (){
+                % $(hostname --long)
+                age-keygen -y /etc/barnyard/age |
+                    tee /var/lib/barnyard/commit/age/%q
+            }
         } always {
             caught
         } > >(indent)
         banner 'gpg'
         {
-            try show gpg --version || tried
-            try show eval 'export GNUPGHOME=/etc/barnyard/gnupg' || tried
-            try show eval 'print $GNUPGHOME' || tried
-            { try show || tried; } <<'            EOF'
-                ( umask 077 && mkdir -p /etc/barnyard/gnupg )
-            EOF
-            { try show || tried; } <<'            EOF'
-                cat <<EOF | tee key_details
-                %echo Generating a basic OpenPGP key
+            (){ gpg --version }
+            (){ export GNUPGHOME=/etc/barnyard/gnupg }
+            (){ print $GNUPGHOME }
+            (){ ( umask 077 && mkdir -p /etc/barnyard/gnupg ) }
+            (){
+                cat > tee key_details
+            } % $(hostname --long) $(hostname --long) <<'            EOF'
+                %%echo Generating a basic OpenPGP key
                 Key-Type: RSA
                 Key-Length: 2048
                 Subkey-Type: RSA
                 Subkey-Length: 2048
-                Name-Real: $(hostname --long)
+                Name-Real: %s
                 Name-Comment: Root Personal Key
-                Name-Email: user@$(hostname --long)
+                Name-Email: user@%s
                 Expire-Date: 0
                 %no-ask-passphrase
                 %no-protection
                 # Do a commit here, so that we can later print "done" :-)
-                %commit
-                %echo done
+                %%commit
+                %%echo done
                 EOF
             EOF
-            { try show || tried; } <<'            EOF'
-                gpg --list-keys $(hostname --long) || gpg --verbose --batch --gen-key key_details
-            EOF
-            try show gpg --list-keys || tried
+            (){
+                % $(hostname --long)
+                gpg --list-keys %q || gpg --verbose --batch --gen-key key_details
+            }
+            (){ gpg --list-keys }
         } always {
             caught
         } > >(indent)
@@ -996,28 +712,15 @@ function barnyard:ssh:known-hosts {
     typeset known_hosts
     banner 'set SSH known hosts'
     {
-        { try show || tried 'must be run as root'; } <<'        EOF'
-            (( $EUID == 0 ))
-        EOF
+        (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then
-            try show eval 'known_hosts=$(cat)' || tried
+            (){ known_hosts=$(cat) }
         else
-            {
-                try show -f $o_file || tried '"known_hosts" file does not exist';
-            } <<'            EOF'
-                [[ -e %q ]]
-            EOF
-            { try show -f $o_file || tried; } <<'            EOF'
-                known_hosts=$(<%q)
-            EOF
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; known_hosts=$(<%q) }
         fi
-        try show rm -f /etc/barnyard/id_barnyard || tried
-        { try show || tried; } <<'        EOF'
-            printf '%s\n' $known_hosts > /etc/barnyard/known_hosts
-        EOF
-        { try show || tried; } <<'        EOF'
-            cat /etc/barnyard/known_hosts
-        EOF
+        (){ printf '%s\n' $known_hosts > /etc/barnyard/known_hosts }
+        (){ cat /etc/barnyard/known_hosts }
     } always {
         caught
     } > >(indent)
@@ -1028,28 +731,18 @@ function barnyard:ssh:private-key {
     barnyard_version_check
     [[ -v o_file ]] || abend 'key file is required'
     typeset key
-    banner 'set private SSH key'
+    block 'set private SSH key'
     {
-        { try show || tried 'must be run as root'; } <<'        EOF'
-            (( $EUID == 0 ))
-        EOF
+        (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then
-            try show eval 'key=$(cat)' || tried
+            (){ key=$(cat) }
         else
-            { try show -f $o_file || tried 'key file does not exist'; } <<'            EOF'
-                [[ -e %q ]]
-            EOF
-            { try show -f $o_file || tried; } <<'            EOF'
-                file=$(<%q)
-            EOF
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; file=$(<%q) }
         fi
-        try show rm -f /etc/barnyard/id_barnyard || tried
-        { try show || tried; } <<'        EOF'
-            ( umask 077 && printf '%s\n' $key > /etc/barnyard/id_barnyard )
-        EOF
-        { try show || tried; } <<'        EOF'
-            ssh-keygen -lf /etc/barnyard/id_barnyard
-        EOF
+        (){ rm -f /etc/barnyard/id_barnyard }
+        (){ (umask 077 && printf '%s\n' $key > /etc/barnyard/id_barnyard) }
+        (){ ssh-keygen -lf /etc/barnyard/id_barnyard }
     } always {
         caught
     } > >(indent)
@@ -1060,123 +753,47 @@ function barnyard:ssh {
     delegate "$@"
 }
 
-function barnyard:version {
-    eval "$(args -b h,help -- "$@")"
-    print $BARNYARD_VERSION
+function :args:module {
+    eval "$(args -s ,barnyard -s ,module -- "$@")"
 }
-
-# Unlike other utilities where you've done this, `barnyard` will only ever run
-# compiled unless you are doing development on a deployed machine. It does not
-# have to run on the client machine.
-function barnyard:compile {
-    eval "$(args -s v,version d,date -- "$@")"
-    # TODO Regular expression checking.
-    if [[ -v o_version ]]; then
-        BARNYARD_VERSION=$o_version
-    fi
-    # TODO Regular expression that this is epoch seconds.
-    if [[ -v o_date ]]; then
-        BARNYARD_RELEASE_DATE=$(TZ=UTC date --date=@$o_date +'%B %-d, %Y')
-    fi
-    typeset strip='
-        /^function {$/{flag=1}
-        /^}/&&flag{flag=0;next}
-        !flag
-    '
-    {
-        if [[ -v BARNYARD_IS_COMPILED ]]; then
-            cat ${ZSH_ARGZERO:A}
-        else
-            typeset dir=${ZSH_ARGZERO:A:h:h}
-            cat $dir/lib/barnyard/header.zsh
-            printf '\n'
-            awk $strip $dir/lib/barnyard/parse.zsh
-            printf '\n\n___ barnyard_include ___\n\n'
-            awk $strip $dir/lib/barnyard/heredoc.zsh
-            printf '\n'
-            awk $strip $dir/lib/barnyard/block.zsh
-            printf '\n\n___\n\n'
-            awk $strip $dir/lib/barnyard/catch.zsh
-            printf '\n'
-            awk $strip $dir/lib/barnyard/splat.zsh
-            printf '\n'
-            cat $dir/bin/barnyard
-        fi
-    } | sed -e "$(
-        printf 's/^BARNYARD_VERSION=.*$/BARNYARD_VERSION=%s/\n' $BARNYARD_VERSION
-    )" -e "$(
-        printf 's/^BARNYARD_RELEASE_DATE=.*$/BARNYARD_RELEASE_DATE=%s/\n' ${(qqq)BARNYARD_RELEASE_DATE}
-    )"
-}
-
-function _barnyard_options_error {
-    typeset func=${1:-} reason=${2:-} flag=${3:-}
-    case $reason in
-        required )
-            printf '`%s` is a required argument.\n' $flag 1>&2
-            exit 1
-            ;;
-        execute )
-            print "here's some help"
-            exit
-    esac
-}
-
-function barnyard_args_error {
-    print -u 2 -- "$@"
-    exit 1
-}
-
-function args {
-    parser barnyard_args_error 3 "$@"
-    printf '(( $o_help )) && barnyard_usage %s\n' $funcstack[2]
-}
-
-function delegate {
-    typeset prefix=$funcstack[2]
-    (( $# )) || abend 'fatal: %s expects a command argument' ${prefix//:/ }
-    typeset delegate=$prefix:$1
-    shift
-    (( $BARNCTL_COMMANDS[(Ie)$delegate] )) || abend 'fatal: no such command `%s`.' ${delegate//:/ }
-    $delegate "$@"
-}
-
-function barnyard {
-    typeset -xg BARNCTL_COMMANDS=()
-    BARNCTL_COMMANDS=(
-        "${(@f)$(sed -n 's/^function *\(barnyard:[^:][^ ]*\) *{$/\1/p' ${ZSH_ARGZERO:a})}"
-    )
-    typeset -A o_block
-    typeset dir=${ZSH_ARGZERO:A:h:h}
-    if [[ ! -v BARNYARD_IS_COMPILED ]]; then
-        source $dir/lib/barnyard/heredoc.zsh
-        source $dir/lib/barnyard/block.zsh
-        source $dir/lib/barnyard/parse.zsh
-    fi
-    eval "$(args -b h,help -- "$@")"
-    delegate "$@"
-}
-
-barnyard "$@"
-
-exit
-
-___ barnyard_apply ___
-source <(awk '/^___ barnyard_common ___/{flag=1;next}/^___/{flag=0}flag' < <("$BARNYARD_PATH/barnyard" compile))
-source <(awk '/^___ barnyard_include ___/{flag=1;next}/^___/{flag=0}flag' < <("$BARNYARD_PATH/barnyard" compile))
-
-typeset -A o_barnyard=( "${(@Q)${(@z)__BARNYARD_O_BARNYARD__}}" ) o_module=( "${(@Q)${(@z)__BARNYARD_O_MODULE__}}" )
-unset __BARNYARD_O_BARNYARD__ __BARNYARD_O_MODULE__
 
 function barnyard_always {
     typeset -A o_registers=( always yes )
-    barnyard_run_ "$@"
+    :barnyard:run "$@"
 }
 
-cd "$o_barnyard[archive]"
-
-function {
-    typeset -A o_block
-    source "$o_barnyard[source]"
+function :execute:module {
+    function {
+        typeset -A o_barnyard=( "${(@QA)${(z)1}}" )
+        typeset -A o_module=( "${(@QA)${(z)2}}" )
+        shift 2
+        cd "$o_barnyard[archive]"
+        typeset -A o_block
+        source "$o_barnyard[source]"
+        exit
+    } $o_barnyard $o_module
 }
-___
+
+function :execute {
+    if (( $# )) && [[
+        ( $shebang =~ ^\. || $shebang =~ / ) &&
+        -f $shebang &&
+        (
+            (
+                "$(head -c 14 $shebang)" = '#!/usr/bin/env' &&
+                "$(head -n 1 $shebang)" =~ ^#!/usr/bin/env\ +([^ ]+)\ *$ &&
+                $match[1] = barnyard
+            ) ||
+            (
+                "$(head -n 1 $shebang)" =~ ^#!(/[^ ]+)\ *$ &&
+                $match[1] = barnyard
+            )
+        )
+    ]]; then
+        print shebangable
+    else
+        delegate "$@"
+    fi
+}
+
+# vim: ft=zsh :
