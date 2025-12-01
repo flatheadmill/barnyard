@@ -570,6 +570,7 @@ function :args:clone {
 function :execute:clone {
     barnyard_version_check
     [[ -v o_repository ]] || abend 'a git repository url is required'
+    exemplar :barnyard:clone
 }
 
 function :barnyard:clone {
@@ -579,13 +580,14 @@ function :barnyard:clone {
         (){ [[ -e /etc/barnyard/known_hosts ]] }
         (){ export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts' }
         (){ rm -rf /var/lib/barnyard/repository }
+        typeset repository=
         (){
-            % "${o_repository%#*}"
+            % ${o_repository%\#*}
             git clone --mirror %q /var/lib/barnyard/repository
         }
         (){
-            % "${o_repository##*#}"
-            printf 'branch=%%s\n' %q > /etc/barnyard/config
+            % "${o_repository##*\#}"
+            print branch=%q > /etc/barnyard/config
         }
     } always {
         caught
