@@ -30,6 +30,10 @@ export BARNYARD_PATH=${${0:a}%/*}
 BARNYARD_VERSION=0.0.0
 BARNYARD_RELEASE_DATE='January 1, 1970'
 
+function :execute:version {
+    print $BARNYARD_VERSION
+}
+
 ___ barnyard_common ___
 typeset -A PRIORITY
 
@@ -559,10 +563,16 @@ function command_barnyard_systemd {
 # and so yes, it could change. You might want to rename your repository, why
 # not? It's not immutable like the age or gpg key.
 
-function barnyard:clone {
+function :args:clone {
     eval "$(args 'r,repository' v,version -b h,help -- "$@")"
+}
+
+function :execute:clone {
     barnyard_version_check
     [[ -v o_repository ]] || abend 'a git repository url is required'
+}
+
+function :barnyard:clone {
     banner 'clone'
     {
         (){ [[ -e /etc/barnyard/id_barnyard ]] }
@@ -582,17 +592,21 @@ function barnyard:clone {
     } > >(indent)
 }
 
-function barnyard:commit {
+function :args:commit {
     eval "$(args v,version -b h,help -- "$@")"
+}
+
+function :execute:commit {
     barnyard_version_check
     ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
 }
 
-function barnyard:gpg:trust {
+function :args:gpg:trust {
     eval "$(args p,fingerprint v,version -b h,help -- "$@")"
-    barnyard_version_check
-    [[ -v o_fingerprint ]] || abend 'a GPG public key fingerprint is required'
-    banner 'trust GPG fingerprint'
+}
+
+function :barnyard:gpg:trust {
+    block 'trust GPG fingerprint'
     {
         (){ (( $EUID == 0 )) }
         (){
@@ -605,17 +619,30 @@ function barnyard:gpg:trust {
     } > >(indent)
 }
 
+function :execute:gpg:trust {
+    barnyard_version_check
+    [[ -v o_fingerprint ]] || abend 'a GPG public key fingerprint is required'
+    exemplar :barnyard:gpg:trust
+}
+
 # Here we add a gpg key. We also need a function to remove a key. We could use
 # a Barnyard module to remove a key, but then the user has to have one, write
 # one and if a key was compromised they'd want to remove it without running
 # Barnyard, because Barnyard could not be trusted until the key was revoked.
 
-function barnyard:gpg:import {
+function :args:gpg:import {
     eval "$(args f,file v,version -b h,help -- "$@")"
+}
+
+function :execute:gpg:import {
     barnyard_version_check
     [[ -v o_file ]] || abend 'GPG key file is required'
+    exemplar :barnyard:gpg:import
+}
+
+function :barnyard:gpg:import {
     typeset gpg_key
-    banner 'add GPG signing key'
+    block 'add GPG signing key'
     {
         (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then
@@ -631,8 +658,11 @@ function barnyard:gpg:import {
     } > >(indent)
 }
 
-function barnyard:gpg {
+function :args:gpg {
     eval "$(args -b h,help -- "$@")"
+}
+
+function :execute:gpg {
     delegate "$@"
 }
 
