@@ -648,7 +648,7 @@ function :barnyard:gpg:import {
     {
         (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then
-            (){ gpg_key=$(cat) }
+            try show eval 'gpg_key=$(cat)' || tried
         else
             (){ % $o_file; [[ -e %q ]] }
             (){ % $o_file; gpg_key=$(<%q) }
@@ -775,30 +775,43 @@ function :barnyard:ssh:known-hosts {
     } > >(indent)
 }
 
-function barnyard:ssh:private-key {
+function :args:ssh:private-key {
     eval "$(args v,version f,file -b h,help -- "$@")"
+}
+
+function :execute:ssh:private-key {
     barnyard_version_check
     [[ -v o_file ]] || abend 'key file is required'
+    exemplar :barnyard:ssh:private-key
+}
+
+function :barnyard:ssh:private-key {
     typeset key
     block 'set private SSH key'
     {
         (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then
-            (){ key=$(cat) }
+            try show eval 'key=$(cat)' || tried
         else
             (){ % $o_file; [[ -e %q ]] }
             (){ % $o_file; file=$(<%q) }
         fi
         (){ rm -f /etc/barnyard/id_barnyard }
-        (){ (umask 077 && printf '%s\n' $key > /etc/barnyard/id_barnyard) }
+        (){ wc <<< $key }
+        (){ (umask 077 && print -- $key > /etc/barnyard/id_barnyard) }
+        (){ print hello }
         (){ ssh-keygen -lf /etc/barnyard/id_barnyard }
+        (){ print hello }
     } always {
         caught
     } > >(indent)
 }
 
-function barnyard:ssh {
+function :args:ssh {
     eval "$(args -b h,help -- "$@")"
+}
+
+function :execute:ssh {
     delegate "$@"
 }
 

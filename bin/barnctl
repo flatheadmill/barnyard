@@ -216,7 +216,6 @@ function :args:bootstrap {
 
 function :execute:bootstrap {
     [[ -v o_uri || -n $o_uri ]] || abend 'fatal: ssh hostname is required'
-    typeset VERSION=0.0.0
     typeset slurp gpg fingerprint
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
@@ -249,7 +248,7 @@ function :execute:bootstrap {
         if [[ -v o_clone ]]; then
             printf 'barnyard clone --version=%q --repository %q || exit 1\n' $VERSION "$o_clone"
         fi
-    } | cat # | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" '/usr/bin/sudo /bin/bash'
 }
 
 function assert_barnyard_directory {
@@ -313,6 +312,7 @@ function :execute:configure {
         [[ $machine = $~o_include ]] || continue
         [[ $machine = $~o_exclude ]] && continue
         for module in machines/$machine/*; do
+            print $module
             barnctl_read_config o_module $module
             if [[ -z $o_module[_module] ]]; then
                 o_module[_module]=${module:t}
@@ -368,7 +368,7 @@ function :execute:inventory {
 }
 
 function barnctl_barnyard_source {
-    typeset barnyard=$(<$BARNCTL_DIR/barnyard)
+    typeset barnyard=$(sed 's/BARNYARD_VERSION=.*/BARNYARD_VERSION='$VERSION'/' < $BARNCTL_DIR/barnyard)
     heredoc -f $barnyard <<'    EOF'
         set -e
         BARNYARD_SOURCE=$(cat <<'EOS'
@@ -438,7 +438,7 @@ echo bootstrap
 echo
 {
     echo '$ apt-get update && apt-get install -y zsh gnupg2 git age'
-    apt-get update && apt-get install -y zsh gnupg2 git age
+    #apt-get update && apt-get install -y zsh gnupg2 git age
     echo '$ mkdir -p /var/lib/barnyard'
     mkdir -p /var/lib/barnyard
     echo '$ rm -rf /var/lib/barnyard/zshctl'
