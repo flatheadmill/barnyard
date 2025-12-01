@@ -81,7 +81,7 @@ function barnyard_extract {
     setopt localoptions pipefail
     typeset branch=${1:-} destination=${2:-} good
     good=$(
-        git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch
+        git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch --
     ) || abend 'git log unable to verify signature'
     case $good-${o_check_signature:-1} in
         G-1 | *-0 )
@@ -813,6 +813,7 @@ function barnyard_always {
 
 function :execute:module {
     function {
+        typeset o_check_signature=0
         typeset -A o_barnyard=( "${(@QA)${(z)1}}" )
         typeset -A o_module=( "${(@QA)${(z)2}}" )
         shift 2
