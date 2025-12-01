@@ -346,7 +346,7 @@ function :barnyard:run {
 ___
 function barnyard_version_check {
     [[ -v o_version ]] && {
-        [[ "$o_version" = "$BARNYARD_VERSION" ]] || abend "local=$o_version" remote=$BARNYARD_VERSION 'version mismatch, please run upgrade'
+        [[ "$o_version" = "$BARNYARD_VERSION" ]] || abend "local=%s remote=%s %s" $o_version $BARNYARD_VERSION 'version mismatch, please run upgrade'
     }
 }
 
@@ -573,7 +573,7 @@ function :execute:clone {
 }
 
 function :barnyard:clone {
-    banner 'clone'
+    block 'clone'
     {
         (){ [[ -e /etc/barnyard/id_barnyard ]] }
         (){ [[ -e /etc/barnyard/known_hosts ]] }
@@ -670,17 +670,23 @@ function :args:prepare {
     eval "$(args h,help -- "$@")"
 }
 
+
 function :execute:prepare {
+    exemplar :barnyard:prepare
+}
+
+function :barnyard:prepare {
+    setopt localoptions pipefail
     typeset tmp; tmp=$(mktemp -d)
     {
         pushd $tmp
-        banner 'git'
+        block 'git'
         {
             (){ git --version }
         } always {
             caught
         } > >(indent)
-        banner 'age'
+        block 'age'
         {
             (){ mkdir -p /etc/barnyard }
             (){ age --version }
@@ -690,22 +696,22 @@ function :execute:prepare {
             }
             (){ mkdir -p /var/lib/barnyard/commit/age }
             (){
-                % $(hostname --long)
+                % $(</etc/hostname)
                 age-keygen -y /etc/barnyard/age |
                     tee /var/lib/barnyard/commit/age/%q
             }
         } always {
             caught
         } > >(indent)
-        banner 'gpg'
+        block 'gpg'
         {
             (){ gpg --version }
             (){ export GNUPGHOME=/etc/barnyard/gnupg }
             (){ print $GNUPGHOME }
             (){ ( umask 077 && mkdir -p /etc/barnyard/gnupg ) }
             (){
-                cat > tee key_details
-            } % $(hostname --long) $(hostname --long) <<'            EOF'
+                { cat | tee key_details; }
+            } % $(</etc/hostname) $(</etc/hostname) <<'            EOF'
                 %%echo Generating a basic OpenPGP key
                 Key-Type: RSA
                 Key-Length: 2048
@@ -720,10 +726,9 @@ function :execute:prepare {
                 # Do a commit here, so that we can later print "done" :-)
                 %%commit
                 %%echo done
-                EOF
             EOF
             (){
-                % $(hostname --long)
+                % $(</etc/hostname)
                 gpg --list-keys %q || gpg --verbose --batch --gen-key key_details
             }
             (){ gpg --list-keys }
@@ -740,12 +745,19 @@ function :execute:prepare {
 # `barnctl` over SSH or at the very least from a file on the filesystem of the
 # host machine.
 
-function barnyard:ssh:known-hosts {
+function :args:ssh:known-hosts {
     eval "$(args v,version f,file -b h,help -- "$@")"
+}
+
+function :execute:ssh:known-hosts {
     barnyard_version_check
     [[ -v o_file ]] || abend 'a "known_hosts" file is required'
+    exemplar :barnyard:ssh:known_hosts
+}
+
+function :barnyard:ssh:known-hosts {
     typeset known_hosts
-    banner 'set SSH known hosts'
+    block 'set SSH known hosts'
     {
         (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then

@@ -210,9 +210,13 @@ function barnctl_command_apply {
 # server-side `barnyard` executable has commands to simplify  the construction
 # of the scripts here.
 
-function execute:bootstrap {
+function :args:bootstrap {
     eval "$(args u,uri k,known s,ssh c,clone -a g,gpg -a f,fingerprint h,help -- "$@")"
+}
+
+function :execute:bootstrap {
     [[ -v o_uri || -n $o_uri ]] || abend 'fatal: ssh hostname is required'
+    typeset VERSION=0.0.0
     typeset slurp gpg fingerprint
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
@@ -222,19 +226,19 @@ function execute:bootstrap {
     {
         print 'set -e'
         if [[ -v o_known ]]; then
-            slurp=$(cat "$o_known")
+            slurp=$(<"$o_known")
             printf 'cat <<EOF | barnyard ssh known-hosts --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         fi
         if [[ -v o_ssh ]]; then
-            slurp=$(cat "$o_ssh")
+            slurp=$(<"$o_ssh")
             printf 'cat <<EOF | barnyard ssh private-key --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         fi
         for gpg in "${(@)o_gpg}"; do
-            slurp=$(cat "$gpg")
+            slurp=$(<"$gpg")
             printf 'cat <<EOF | barnyard gpg import --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
@@ -245,7 +249,7 @@ function execute:bootstrap {
         if [[ -v o_clone ]]; then
             printf 'barnyard clone --version=%q --repository %q || exit 1\n' $VERSION "$o_clone"
         fi
-    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" '/usr/bin/sudo /bin/bash'
+    } | cat # | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" '/usr/bin/sudo /bin/bash'
 }
 
 function assert_barnyard_directory {
@@ -254,8 +258,11 @@ function assert_barnyard_directory {
     EOF
 }
 
-function execute:commit {
+function :args:commit {
     eval "$(args u,uri -b h,help -- "$@")"
+}
+
+function :execute:commit {
     assert_barnyard_directory
     [[ -v o_uri ]] || abend 'an ssh URI or destination is required'
     ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" "/usr/local/bin/barnyard commit --version $VERSION"
@@ -294,9 +301,12 @@ function configure_or_unconfigure {
     done
 }
 
-function execute:configure {
+function :args:configure {
     typeset o_include='*' machine module
     eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
+}
+
+function :execute:configure {
     typeset -A o_module
     for machine in age/*(N); do
         machine=${machine:t}
@@ -321,9 +331,12 @@ function barnctl_command_unconfigure {
     configure_or_unconfigure unconfigure "$@"
 }
 
-function execute:generate {
+function :args:generate {
     typeset o_include='*'
     eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
+}
+
+function :execute:generate {
     typeset configuration generate now=$(date +%s)
     generate="$({
         barnctl_shell_resource barnctl_common
@@ -336,9 +349,12 @@ function execute:generate {
     done
 }
 
-function execute:inventory {
+function :args:inventory {
     typeset o_include='*'
     eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
+}
+
+function :execute:inventory {
     typeset inventory configuration
     inventory="$({
         barnctl_shell_resource barnctl_common
@@ -352,7 +368,7 @@ function execute:inventory {
 }
 
 function barnctl_barnyard_source {
-    typeset barnyard=$($BARNCTL_DIR/barnyard compile --version $VERSION)
+    typeset barnyard=$(<$BARNCTL_DIR/barnyard)
     heredoc -f $barnyard <<'    EOF'
         set -e
         BARNYARD_SOURCE=$(cat <<'EOS'
@@ -362,8 +378,11 @@ function barnctl_barnyard_source {
     EOF
 }
 
-function execute:prepare {
+function :args:prepare {
     eval "$(args u,uri -b h,help -- "$@")"
+}
+
+function :execute:prepare {
     [[ -v o_uri || -n $o_uri ]] || abend 'fatal: an ssh destination or URI is required'
     {
         barnctl_barnyard_source
@@ -391,15 +410,20 @@ function barnctl_command_upgrade {
     } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
 
-function execute:version {
+function :args:version {
     eval "$(args -b h,help -- "$@")"
+}
+
+function :execute:version {
     print $VERSION
 }
 
-function execute {
+function :args {
     typeset BARNCTL_DIR=${zshctl[argzero]:A:h}
-    include parse heredoc block splat
     eval "$(args -UC -bx h,help -- "$@")"
+}
+
+function :execute {
     delegate "$@"
 }
 
@@ -415,6 +439,18 @@ echo
 {
     echo '$ apt-get update && apt-get install -y zsh gnupg2 git age'
     apt-get update && apt-get install -y zsh gnupg2 git age
+    echo '$ mkdir -p /var/lib/barnyard'
+    mkdir -p /var/lib/barnyard
+    echo '$ rm -rf /var/lib/barnyard/zshctl'
+    rm -rf /var/lib/barnyard/zshctl
+    echo '$ git -C /var/lib/barnyard clone --branch topic/main/completion-parse https://github.com/flatheadmill/barnyard.git'
+    git -C /var/lib/barnyard clone --branch topic/main/completion-parse https://github.com/flatheadmill/zshctl.git
+    echo '$ rsync -av /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/'
+    rsync -av /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/
+    echo '$ install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/'
+    install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/
+    echo '$ zshctl version'
+    zshctl version
     echo '$ echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard'
     echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
     echo '$ chmod 755 /usr/local/bin/barnyard'
