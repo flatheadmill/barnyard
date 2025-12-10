@@ -267,39 +267,6 @@ function :execute:commit {
     ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" "/usr/local/bin/barnyard commit --version $VERSION"
 }
 
-function configure_or_unconfigure {
-    typeset operation=${1:-} hostname=${2:-}
-    shift 2
-
-    assert_barnyard_directory
-
-    [[ -d "machines/$hostname" ]] || abend<<'    EOF'
-        error: hostname configuration not found
-    EOF
-    typeset -a modules
-    if (( ! $# )); then
-        for module in machines/$hostname/*; do
-            modules+=(${module##*/})
-        done
-    else
-        modules=("$@")
-    fi
-    typeset -A o_module
-    for module in "${modules[@]}"; do
-        o_module=()
-        barnctl_read_config o_module machines/$hostname/$module
-        if [[ -z "$o_module[_module]" ]]; then
-            o_module[_module]=$module
-        fi
-        if [[ -e ../code/modules/$o_module[_module]/$operation.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) \
-                $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $operation || abend<<'            EOF'
-                $operation module \`$module\` failed
-            EOF
-        fi
-    done
-}
-
 function :args:configure {
     typeset o_include='*' machine module
     eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
@@ -312,23 +279,35 @@ function :execute:configure {
         [[ $machine = $~o_include ]] || continue
         [[ $machine = $~o_exclude ]] && continue
         for module in machines/$machine/*; do
-            print $module
             barnctl_read_config o_module $module
             if [[ -z $o_module[_module] ]]; then
                 o_module[_module]=${module:t}
             fi
             if [[ -e ../code/modules/$o_module[_module]/configure.zsh ]]; then
-                zsh <(barnctl_shell_resource barnctl_configure) \
-                    $SCRIPT_DIR $PWD $machine $o_module[_module] ${module:t} configure ||
-                        abend 'configure module %s failed' ${(qqq)module}
+                print $module
+                =barnctl internal configure \
+                    --barnyard module=${module:t} \
+                    --barnyard hostname=${machine:t}
             fi
         done
     done
 }
 
-function barnctl_command_unconfigure {
-    eval "$(barnctl_parse_arguments unconfigure "h,help" -- "$@")"
-    configure_or_unconfigure unconfigure "$@"
+function :execute:internal {
+    delegate "$@"
+}
+
+function :args:internal:configure {
+    eval "$(args -A ,barnyard -bx h,help -- "$@")"
+}
+
+function :execute:internal:configure {
+    typeset -A o_module
+    barnctl_read_config o_module machines/$o_barnyard[hostname]/$o_barnyard[module]
+    o_barnyard[barnyard]=$PWD
+    o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
+    o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
+    source "${o_barnyard[barnyard]}/../code/modules/${o_module[_module]:-$o_barnyard[module]}/configure.zsh"
 }
 
 function :args:generate {
@@ -437,14 +416,14 @@ ___ barnctl_prepare ___
 echo bootstrap
 echo
 {
-    echo '$ apt-get update && apt-get install -y zsh gnupg2 git age'
-    #apt-get update && apt-get install -y zsh gnupg2 git age
+    echo '$ apt-get update && apt-get install -y zsh gnupg2 git age rsync'
+    apt-get update && apt-get install -y zsh gnupg2 git age rsync
     echo '$ mkdir -p /var/lib/barnyard'
     mkdir -p /var/lib/barnyard
     echo '$ rm -rf /var/lib/barnyard/zshctl'
     rm -rf /var/lib/barnyard/zshctl
-    echo '$ git -C /var/lib/barnyard clone --branch topic/main/completion-parse https://github.com/flatheadmill/barnyard.git'
-    git -C /var/lib/barnyard clone --branch topic/main/completion-parse https://github.com/flatheadmill/zshctl.git
+    echo '$ git -C /var/lib/barnyard clone --branch topic/main/redux https://github.com/flatheadmill/barnyard.git'
+    git -C /var/lib/barnyard clone --branch topic/main/redux https://github.com/flatheadmill/zshctl.git
     echo '$ rsync -av /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/'
     rsync -av /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/
     echo '$ install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/'
@@ -491,21 +470,6 @@ if [[ "$version" != "$VERSION" ]]; then
     esac
     echo "version: $(barnyard version)"
 fi
-___ barnctl_configure ___
-source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barnctl")
-
-shift
-
-function {
-    typeset -A o_barnyard=( o_force '0' ) o_module o_registers
-    typeset module=${3:-}
-    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[operation]=${5:-}
-    shift 3
-    o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
-    o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
-    barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    source "${o_barnyard[barnyard]}/../code/modules/$module/${o_barnyard[operation]}.zsh"
-} "$@"
 ___ barnctl_generate ___
 function __barnyard_read_config {
     [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
