@@ -323,10 +323,7 @@ function :barnyard:run {
         --module ${(j: :)${(@qq)${(@kv)o_module}}}
     code=$?
 
-    if (( code == 2 )); then
-        log module="$module" "skipping module %s" "$module"
-        return
-    elif (( code )); then
+    if (( code )); then
         log err code=$code module="$module" 'module %s exited %d' "$module" $code
         return $code
     fi
