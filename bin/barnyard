@@ -709,7 +709,7 @@ function :barnyard:prepare {
             (){ print $GNUPGHOME }
             (){ ( umask 077 && mkdir -p /etc/barnyard/gnupg ) }
             (){
-                { cat | tee key_details; }
+                { cat > key_details; }
             } % $(</etc/hostname) $(</etc/hostname) <<'            EOF'
                 %%echo Generating a basic OpenPGP key
                 Key-Type: RSA
@@ -720,8 +720,8 @@ function :barnyard:prepare {
                 Name-Comment: Root Personal Key
                 Name-Email: user@%s
                 Expire-Date: 0
-                %no-ask-passphrase
-                %no-protection
+                %%no-ask-passphrase
+                %%no-protection
                 # Do a commit here, so that we can later print "done" :-)
                 %%commit
                 %%echo done
@@ -751,7 +751,7 @@ function :args:ssh:known-hosts {
 function :execute:ssh:known-hosts {
     barnyard_version_check
     [[ -v o_file ]] || abend 'a "known_hosts" file is required'
-    exemplar :barnyard:ssh:known_hosts
+    exemplar :barnyard:ssh:known-hosts
 }
 
 function :barnyard:ssh:known-hosts {
@@ -760,7 +760,7 @@ function :barnyard:ssh:known-hosts {
     {
         (){ (( $EUID == 0 )) }
         if [[ $o_file = - ]]; then
-            (){ known_hosts=$(cat) }
+            show eval 'known_hosts=$(cat)'
         else
             (){ % $o_file; [[ -e %q ]] }
             (){ % $o_file; known_hosts=$(<%q) }
