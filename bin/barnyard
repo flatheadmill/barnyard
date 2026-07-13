@@ -27,13 +27,69 @@ function ___ {
 # something like `@/modules/postgresql/common`.
 export BARNYARD_PATH=${${0:a}%/*}
 
-BARNYARD_VERSION=0.0.0
+BARNYARD_VERSION=0.26.0
 BARNYARD_RELEASE_DATE='January 1, 1970'
+
+function :help {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Manage foundational machines outside the orchestrator.
+        # opt help
+        Display help for \`barnyard\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard\` is configuration management for the machines that live
+        outside Kubernetes: the foundational virtual machines and services the
+        orchestrator deliberately does not cover.
+
+        Barnyard is one executable. A prepared machine receives the single
+        \`barnyard\` file at \`/usr/local/bin/barnyard\`; there is no package to
+        unpack and no client/server version dance. The file you built is the
+        file the machine runs.
+
+        Barnyard reserves exactly five top-level words: \`control\`, \`agent\`,
+        \`version\`, \`extend\`, and \`completions\`. Every other Unicode word
+        belongs to the user's modules. If Barnyard needs more of its own
+        vocabulary, it nests that work under a word it already owns instead of
+        taking a sixth.
+
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following commands are available. Use \`--help\` on a command for
+        more detail.
+        > commands
+    EOF
+}
+
+function :args {
+    eval "$(args -UD -bx h,help -- "$@")"
+}
+
+function :help:version {
+    heredoc -v help -q <<'    EOF'
+        # desc -- display version
+        Display the current Barnyard version.
+        # opt help
+        Display help for \`barnyard version\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard version\` prints the Barnyard version number to standard out.
+        ## OPTIONS
+        > options
+    EOF
+}
+
+function :args:version {
+    eval "$(args -bx h,help -- "$@")"
+}
 
 function :execute:version {
     print $BARNYARD_VERSION
 }
 
+# TODO The string resources go away. No longer necessary because of zshctl.
+# Modules will have all these functions sourced and inherited.
 ___ barnyard_common ___
 typeset -A PRIORITY
 
@@ -46,15 +102,18 @@ PRIORITY[notice]=5
 PRIORITY[info]=6
 PRIORITY[debug]=7
 
-if [[ -n "$BARNYARD_LOG_LEVEL" ]]; then
-    [[ -z "${PRIORITY[$BARNYARD_LOG_LEVEL]}" ]] && abend "invalid log level %s" "$BARNYARD_LOG_LEVEL"
-else
+if [[ -z "$BARNYARD_LOG_LEVEL" ]]; then
     BARNYARD_LOG_LEVEL=info
+elif (( ! ${+PRIORITY[$BARNYARD_LOG_LEVEL]} )); then
+    print -u 2 "fatal: invalid log level $BARNYARD_LOG_LEVEL"
+    exit 1
 fi
 
 # An environment variable so someone can set this in their shell.
 export BARNYARD_LOG_LEVEL
 
+# TODO  We probably do away with this to some degree, we are going to use JSON
+# now, jq -S json and the jo equivalent, or jo | jq -S whatever.
 function barnyard_write_config {
     typeset map=${1:-} file=${2:-}
     typeset -a fields
@@ -77,6 +136,9 @@ function barnyard_get_array_redux {
     fi
 }
 
+# This is a keeper, I'll bet. I'll bet we can't do Wireguard lighthouse without
+# it, need to get the addresses across production and development (even though
+# we have no "development" providers.)
 function barnyard_extract {
     setopt localoptions pipefail
     typeset branch=${1:-} destination=${2:-} good
@@ -136,6 +198,10 @@ function panic {
     log priority=err "$@"
     exit 1
 }
+
+# TODO Not sure about logging and I would like to reconsider it. I don't know
+# what sort of logging we should have. There is some fumbling here with the
+# system journal as well, but I can't say I really knew what I was doing there.
 
 # Appears as though the last time I visted this, I'd given up on the notion of
 # logging each line to systemd with an appropriate PRIORITY since we are going
@@ -260,7 +326,6 @@ function :barnyard:run {
     module=${module%%/*}
     [[ $program = $module ]] && program=apply.zsh
 
-    # ERROR Now we are stomping the parent context when we run `barnyard_always`.
     barnyard[configuration]="$barnyard[archive]/conf/machines/$barnyard[hostname]/$module"
     barnyard[resources]="$barnyard[archive]/conf/resources/$barnyard[hostname]"
     barnyard[age]="$(<"$barnyard[archive]/conf/age/$barnyard[hostname]")" || \
@@ -298,7 +363,6 @@ function :barnyard:run {
                 fi
                 barnyard_get_array o_module _diff diffs
                 diffs+=("machines/$barnyard[hostname]/$module")
-                git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"
                 if git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
                     log run=0 ran=1 module="$module" program="$program" apply=diff msg= 'check dirty'
                     return
@@ -338,7 +402,7 @@ function :barnyard:run {
         git -C "$o_barnyard[repository]" log -n 1 --format='%H %at' "$barnyard[sha1]" > "/var/lib/barnyard/applied/$module"
     fi
 
-    (( --o_barnyard[limit] ))
+    (( --o_barnyard[limit], 1 ))
 }
 ___
 function barnyard_version_check {
@@ -347,11 +411,14 @@ function barnyard_version_check {
     }
 }
 
+# TODO Not sure, too, what this naming convention was about, but it is a pretty
+# strong indicator that this is an internal function. I suppose it keeps the
+# namespace really clean.
 function :barnyard:order:modules {
     mkdir -p "/var/lib/barnyard/sha1"
-    typeset -A ordered o_module o_program o_order
-    typeset -a unordered ordered
-    typeset configuration operation module program
+    typeset -A o_order
+    typeset -a ordered
+    typeset module
 
     barnyard_read_config o_order "$o_barnyard[archive]/conf/machines/$o_barnyard[hostname]/order"
     barnyard_get_array o_order module ordered
@@ -408,9 +475,7 @@ function :barnyard:apply {
                 done
             else
                 [[ "$o_barnyard[always]" = no ]] || abend 'always requires specific modules to run'
-                typeset -a modules
-                modules=("${(@f)$(ls "${o_barnyard[archive]}/conf/machines/${o_barnyard[hostname]}")}")
-                :barnyard:order:modules "${modules[@]}"
+                :barnyard:order:modules
             fi
         else
             [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
@@ -441,7 +506,7 @@ function :barnyard:apply {
 function :args:always {
     typeset o_repository=/var/lib/barnyard/repository
     integer o_check_signature=1
-    eval "$(args -@ v,version -d r,repository -b q,quiet h,help f,fetch -d! c,check-signature -- "$@")"
+    eval "$(args -@ v,version -d r,repository -b q,quiet f,fetch -d! c,check-signature -bx h,help -- "$@")"
 }
 
 function :execute:always {
@@ -458,7 +523,7 @@ function :args:apply {
     typeset o_repository=/var/lib/barnyard/repository
     integer o_check_signature=1
     integer o_limit=$(( 16#7fffffffffffffff ))
-    eval "$(args -@ -d l,limit v,version R,ref -d r,repository -b d,dry-run q,quiet h,help -d! c,check-signature -- "$@")"
+    eval "$(args -@ -d l,limit v,version R,ref -d r,repository -b d,dry-run q,quiet -d! c,check-signature -bx h,help -- "$@")"
 }
 
 function :execute:apply {
@@ -474,6 +539,7 @@ function :execute:apply {
     :barnyard:apply "$@"
 }
 
+# TODO Hard won and it works.
 function barnyard_systemd {
     # We're going to only be interested in log entries emitted after we start
     # our unit, so we capture the journal cursor now.
@@ -502,8 +568,8 @@ function barnyard_systemd {
 
     # Assert that we are the ones who ran it.
     # https://askubuntu.com/questions/978711/how-do-i-split-a-proc-environ-file-in-separate-lines
-    if [[ $(xargs -0 -L1 -a "/proc/${properties[MainPID]}/environ" | awk -v pid=$$ -F= '$1 == "BARNYARD_PID" && $2 == pid { print "true" }') = true ]] || \
-        abend 'some else started this barnyard unit'
+    [[ $(xargs -0 -L1 -a "/proc/${properties[MainPID]}/environ" | awk -v pid=$$ -F= '$1 == "BARNYARD_PID" && $2 == pid { print "true" }') = true ]] || \
+        abend 'someone else started this barnyard unit'
 
     # Start tailing the unit.
     journalctl --quiet --cursor "$cursor" --no-hostname --no-pager -fe --unit barnyard &
@@ -537,6 +603,7 @@ function barnyard_systemd {
     [[ $outcome[MESSAGE_ID] = 98e322203f7a4ed290d09fe03c09fe15 ]] && return $outcome[EXIT_STATUS]
 }
 
+# TODO This should be a flag... --systemd.
 function command_barnyard_systemd_always {
     eval "$(barnyard_parse_arguments systemd_always v,version: h,help -- "$@")"
     barnyard_version_check
@@ -561,7 +628,7 @@ function command_barnyard_systemd {
 # not? It's not immutable like the age or gpg key.
 
 function :args:clone {
-    eval "$(args 'r,repository' v,version -b h,help -- "$@")"
+    eval "$(args 'r,repository' v,version -bx h,help -- "$@")"
 }
 
 function :execute:clone {
@@ -592,7 +659,7 @@ function :barnyard:clone {
 }
 
 function :args:commit {
-    eval "$(args v,version -b h,help -- "$@")"
+    eval "$(args v,version -bx h,help -- "$@")"
 }
 
 function :execute:commit {
@@ -601,7 +668,7 @@ function :execute:commit {
 }
 
 function :args:gpg:trust {
-    eval "$(args p,fingerprint v,version -b h,help -- "$@")"
+    eval "$(args p,fingerprint v,version -bx h,help -- "$@")"
 }
 
 function :barnyard:gpg:trust {
@@ -618,6 +685,12 @@ function :barnyard:gpg:trust {
     } > >(indent)
 }
 
+# TODO Making peace with GPG after having decided it was a relic from the 90's.
+# But, didn't we also add the ability to trust SSH signing? If not, we should.
+
+# TODO And furthermore, that signing... that was stretch, wasn't it?
+
+# TODO Oh! Oh! birdonwire can be a barnyard extension! (Wireguard specific.)
 function :execute:gpg:trust {
     barnyard_version_check
     [[ -v o_fingerprint ]] || abend 'a GPG public key fingerprint is required'
@@ -629,8 +702,12 @@ function :execute:gpg:trust {
 # one and if a key was compromised they'd want to remove it without running
 # Barnyard, because Barnyard could not be trusted until the key was revoked.
 
+# TODO Really painful if I'm attempting to escape these. All remote calls
+# should be piped JSON to the command path, we should have one command, like
+# `agent configure` that takes a json for all the configuration options and has
+# a case statement to run through them.
 function :args:gpg:import {
-    eval "$(args f,file v,version -b h,help -- "$@")"
+    eval "$(args f,file v,version -bx h,help -- "$@")"
 }
 
 function :execute:gpg:import {
@@ -658,23 +735,217 @@ function :barnyard:gpg:import {
 }
 
 function :args:gpg {
-    eval "$(args -b h,help -- "$@")"
+    eval "$(args -bx h,help -- "$@")"
 }
 
 function :execute:gpg {
     delegate "$@"
 }
 
-function :args:prepare {
-    eval "$(args h,help -- "$@")"
+function :args:control {
+    eval "$(args -bx h,help -- "$@")"
 }
 
+function :help:control {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Run operator-side Barnyard commands.
+        # opt help
+        Display help for \`barnyard control\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control\` is the operator side of Barnyard, run where you sit.
+        It prepares machines, reaches in over SSH for bootstrap work, and
+        directs the machine-side agent commands.
 
-function :execute:prepare {
-    exemplar :barnyard:prepare
+        Barnyard uses \`control\` and \`agent\`, not client and server. The machine
+        side does not serve requests; it acts. \`control\` directs, and \`agent\`
+        does the work on the box.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following commands are available under \`barnyard control\`.
+        > commands
+    EOF
 }
 
-function :barnyard:prepare {
+function :execute:control {
+    delegate "$@"
+}
+
+function :args:control:prepare {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :help:control:prepare {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Prepare a machine to run the Barnyard agent.
+        # opt help
+        Display help for \`barnyard control prepare\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control prepare\` prepares a remote machine to host the
+        Barnyard agent. The distribution-specific leaf command installs the
+        base toolchain, installs zshctl, copies the current Barnyard executable
+        into place, and then runs the agent's local preparation step on the
+        machine.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following prepare targets are available.
+        > commands
+    EOF
+}
+
+function :execute:control:prepare {
+    delegate "$@"
+}
+
+function :args:control:prepare:ubuntu {
+    eval "$(args -d d,destination -bx h,help -- "$@")"
+}
+
+function :help:control:prepare:ubuntu {
+    heredoc -v help -q <<'    EOF'
+        # desc -- prepare an Ubuntu machine over SSH
+        Prepare an Ubuntu machine to run the Barnyard agent.
+        # opt destination -- < ssh destination >
+        # opt help
+        Display help for \`barnyard control prepare ubuntu\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control prepare ubuntu\` connects to the SSH destination and
+        pipes a bootstrap script to remote \`sudo -n /bin/bash\`.
+
+        The bootstrap installs \`zsh\`, \`gnupg2\`, \`git\`, \`age\`, \`rsync\`, \`jo\`,
+        and \`jq\`; installs zshctl; writes the current Barnyard executable to
+        \`/usr/local/bin/barnyard\`; and runs \`barnyard agent prepare ubuntu\` on
+        the remote machine.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard control\` for the operator side of Barnyard.
+
+        \`barnyard agent prepare ubuntu\` for the machine-local preparation step.
+    EOF
+}
+
+function :execute:control:prepare:ubuntu {
+    [[ -v o_destination ]] || abend 'a destination is required'
+
+    typeset source=${${(%):-%x}:A} bootstrap
+    bootstrap=$(resource control_prepare_ubuntu $source)
+    [[ -n $bootstrap ]] || abend 'bootstrap resource is missing from %s' $source
+
+    {
+        barnyard_source
+        print -r -- "$bootstrap"
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 -- "$o_destination" '/usr/bin/sudo -n /bin/bash' ||
+        abend 'unable to prepare %s' "$o_destination"
+}
+
+function barnyard_source {
+    typeset barnyard=$(<${${(%):-%x}:A})
+    heredoc -f "$barnyard" <<'    EOF'
+        set -e
+        set -o pipefail
+        BARNYARD_SOURCE=$(cat <<'EndOfBarnyard'
+        %s
+        EndOfBarnyard
+        )
+    EOF
+}
+
+function :help:agent {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Run machine-side Barnyard commands.
+        # opt help
+        Display help for \`barnyard agent\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent\` is the machine side of Barnyard. It runs on the box
+        and performs the work that changes local state.
+
+        Some agent commands, such as \`apply\` and \`always\`, are run by hand on
+        the machine. Others are reached by \`barnyard control\` over SSH during
+        bootstrap and setup.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following commands are available under \`barnyard agent\`.
+        > commands
+    EOF
+}
+
+function :args:agent {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent {
+    delegate "$@"
+}
+
+function :help:agent:prepare {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Prepare the local machine for Barnyard.
+        # opt help
+        Display help for \`barnyard agent prepare\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent prepare\` contains the machine-local preparation steps
+        that run after the Barnyard executable and its base dependencies are in
+        place.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following prepare targets are available.
+        > commands
+    EOF
+}
+
+function :args:agent:prepare {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent:prepare {
+    delegate "$@"
+}
+
+function :help:agent:prepare:ubuntu {
+    heredoc -v help -q <<'    EOF'
+        # desc -- prepare the local Ubuntu agent
+        Prepare the local Ubuntu machine for Barnyard.
+        # opt help
+        Display help for \`barnyard agent prepare ubuntu\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent prepare ubuntu\` runs on the Ubuntu machine itself. It
+        verifies the installed tools, creates \`/etc/barnyard\`, creates the
+        machine age key if one does not already exist, records the public age
+        key for commit back to the control side, and prepares the Barnyard GPG
+        home and machine key.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard agent\` for the machine side of Barnyard.
+
+        \`barnyard control prepare ubuntu\` for the operator command that invokes
+        this command during bootstrap.
+    EOF
+}
+
+function :args:agent:prepare:ubuntu {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent:prepare:ubuntu {
+    exemplar :barnyard:prepare:ubuntu
+}
+
+function :barnyard:prepare:ubuntu {
     setopt localoptions pipefail
     typeset tmp; tmp=$(mktemp -d)
     {
@@ -740,12 +1011,12 @@ function :barnyard:prepare {
     }
 }
 
-# We could transfer this age encrypted, but we assume it is comming from
-# `barnctl` over SSH or at the very least from a file on the filesystem of the
-# host machine.
+# We could transfer this age encrypted, but we assume it is coming from
+# `barnyard control` over SSH or from a file on the filesystem of the operator
+# machine.
 
 function :args:ssh:known-hosts {
-    eval "$(args v,version f,file -b h,help -- "$@")"
+    eval "$(args v,version f,file -bx h,help -- "$@")"
 }
 
 function :execute:ssh:known-hosts {
@@ -773,7 +1044,7 @@ function :barnyard:ssh:known-hosts {
 }
 
 function :args:ssh:private-key {
-    eval "$(args v,version f,file -b h,help -- "$@")"
+    eval "$(args v,version f,file -bx h,help -- "$@")"
 }
 
 function :execute:ssh:private-key {
@@ -791,21 +1062,19 @@ function :barnyard:ssh:private-key {
             try show eval 'key=$(cat)' || tried
         else
             (){ % $o_file; [[ -e %q ]] }
-            (){ % $o_file; file=$(<%q) }
+            (){ % $o_file; key=$(<%q) }
         fi
         (){ rm -f /etc/barnyard/id_barnyard }
         (){ wc <<< $key }
         (){ (umask 077 && print -- $key > /etc/barnyard/id_barnyard) }
-        (){ print hello }
         (){ ssh-keygen -lf /etc/barnyard/id_barnyard }
-        (){ print hello }
     } always {
         caught
     } > >(indent)
 }
 
 function :args:ssh {
-    eval "$(args -b h,help -- "$@")"
+    eval "$(args -bx h,help -- "$@")"
 }
 
 function :execute:ssh {
@@ -814,11 +1083,6 @@ function :execute:ssh {
 
 function :args:module {
     eval "$(args -s ,barnyard -s ,module -- "$@")"
-}
-
-function barnyard_always {
-    typeset -A o_registers=( always yes )
-    :barnyard:run "$@"
 }
 
 function :execute:module {
@@ -834,26 +1098,36 @@ function :execute:module {
     } $o_barnyard $o_module
 }
 
-function :execute {
-    if (( $# )) && [[
-        ( $shebang =~ ^\. || $shebang =~ / ) &&
-        -f $shebang &&
-        (
-            (
-                "$(head -c 14 $shebang)" = '#!/usr/bin/env' &&
-                "$(head -n 1 $shebang)" =~ ^#!/usr/bin/env\ +([^ ]+)\ *$ &&
-                $match[1] = barnyard
-            ) ||
-            (
-                "$(head -n 1 $shebang)" =~ ^#!(/[^ ]+)\ *$ &&
-                $match[1] = barnyard
-            )
-        )
-    ]]; then
-        print shebangable
-    else
-        delegate "$@"
-    fi
-}
+return
+___ control_prepare_ubuntu ___
+echo bootstrap
+echo
+{
+    echo '$ export DEBIAN_FRONTEND=noninteractive'
+    export DEBIAN_FRONTEND=noninteractive
+    echo '$ apt-get update && apt-get install -y zsh gnupg2 git age rsync jo jq'
+    apt-get update && apt-get install -y zsh gnupg2 git age rsync jo jq
+    echo '$ mkdir -p /var/lib/barnyard'
+    mkdir -p /var/lib/barnyard
+    echo '$ rm -rf /var/lib/barnyard/zshctl'
+    rm -rf /var/lib/barnyard/zshctl
+    echo '$ git -C /var/lib/barnyard clone --branch topic/main/redux https://github.com/flatheadmill/zshctl.git'
+    git -C /var/lib/barnyard clone --branch topic/main/redux https://github.com/flatheadmill/zshctl.git
+    echo '$ rsync -av --delete /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/'
+    rsync -av --delete /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/
+    echo '$ install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/'
+    install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/
+    echo '$ zshctl version'
+    zshctl version
+    echo '$ echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard'
+    echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
+    echo '$ chmod 755 /usr/local/bin/barnyard'
+    chmod 755 /usr/local/bin/barnyard
+    echo '$ barnyard version'
+    barnyard version
+} 2>&1 | sed -u 's/^/    /'
+echo
+barnyard agent prepare ubuntu
+___
 
 # vim: ft=zsh :

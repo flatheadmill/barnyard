@@ -6,7 +6,7 @@ This README is also where Barnyard's decisions are written down and kept. A deci
 
 ## Install
 
-`barnyard control prepare <ssh-destination>` pipes a bootstrap script to the box over SSH as `sudo bash`: it installs the dependencies, installs zshctl, and writes the single-file `barnyard` to `/usr/local/bin/barnyard`.
+`barnyard control prepare ubuntu --destination <ssh-destination>` pipes a bootstrap script to the box over SSH as `sudo bash`: it installs the dependencies, installs zshctl, and writes the single-file `barnyard` to `/usr/local/bin/barnyard`.
 
 Dependencies on a prepared machine: `zsh`, `gnupg2` (gpg), `git`, `age`, `rsync`, and — for JSON configuration — `jo` and `jq`. Ubuntu is what we run; another distribution is only the package step, so `barnyard control prepare fedora` installs the same set with `dnf` and copies the same one file. The binary does not change; only the package manager does.
 
