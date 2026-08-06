@@ -55,11 +55,13 @@ function assert_file_equal {
 }
 function write_manifest {
     typeset language=${1:-}
+    typeset mode=${2:-diff}
+    typeset implementation=${3:-barnyard.system.locale}
     cat > $tmp/work/conf/fixture.zsh <<EOF
         typeset -a labels=( alpha 'two words' )
         typeset -A settings=( region west )
         machine fixture.example code=topic/locale bootstrap=1
-        @ locale/apply diff barnyard.system.locale language=$language labels@=labels \
+        @ locale/apply $mode $implementation language=$language labels@=labels \
             tags+=first 'tags+=two words' %settings
 EOF
 }
@@ -75,9 +77,15 @@ function commit_configuration {
 cat > $tmp/bin/update-locale <<'EOF'
 #!/bin/sh
 set -eu
-jq -e --arg language "$BARNYARD_TEST_EXPECT" '
-    ._apply == "diff" and
-    ._module == "barnyard.system.locale" and
+jq -e --arg language "$BARNYARD_TEST_EXPECT" \
+    --arg apply "$BARNYARD_TEST_APPLY" \
+    --arg module "$BARNYARD_TEST_MODULE" '
+    ._apply == $apply and
+    (if $module == "" then
+        (has("_module") | not)
+    else
+        ._module == $module
+    end) and
     .language == $language and
     .labels == ["alpha", "two words"]
 ' "$BARNYARD_CONFIGURATION" > /dev/null
@@ -111,6 +119,8 @@ export BARNYARD_TEST_LOCALE=$tmp/default-locale
 export BARNYARD_TEST_EXTENSION=$tmp/work/code/barnyard
 export BARNYARD_TEST_ARCHIVE=$tmp/work
 export BARNYARD_TEST_CONFIGURATION=$tmp/work/conf/machines/fixture.example/locale.json
+export BARNYARD_TEST_APPLY=diff
+export BARNYARD_TEST_MODULE=barnyard.system.locale
 
 write_manifest en_GB.UTF-8
 generate
@@ -321,6 +331,57 @@ else
 fi
 marker=( "${(z)$(< $tmp/state/applied/locale)}" )
 assert_equal 'failed locale command does not advance marker' $second_sha "$marker[1]"
+
+rm -f $BARNYARD_TEST_FAIL
+write_manifest en_NZ.UTF-8 once barnyard.locale
+generate
+commit_configuration once-default-implementation
+typeset once_sha=$REPLY
+o_barnyard[sha1]=$once_sha
+export BARNYARD_TEST_EXPECT=en_NZ.UTF-8
+export BARNYARD_TEST_APPLY=once
+export BARNYARD_TEST_MODULE=
+rm -f $tmp/state/applied/locale $BARNYARD_TEST_LOG
+if jq -e 'has("_module") | not' \
+    $tmp/work/conf/machines/fixture.example/locale.json > /dev/null
+then
+    pass 'default implementation is omitted from module configuration'
+else
+    fail 'default implementation is omitted from module configuration'
+fi
+:barnyard:run locale/apply
+invocations=( "${(@f)$(<$BARNYARD_TEST_LOG)}" )
+assert_equal 'default implementation dispatches successfully' 1 ${#invocations}
+assert_equal 'once runs without an applied marker' 1 ${#invocations}
+:barnyard:run locale/apply
+invocations=( "${(@f)$(<$BARNYARD_TEST_LOG)}" )
+assert_equal 'once skips with an applied marker' 1 ${#invocations}
+
+write_manifest en_NZ.UTF-8 always barnyard.locale
+generate
+commit_configuration always
+typeset always_sha=$REPLY
+o_barnyard[sha1]=$always_sha
+export BARNYARD_TEST_APPLY=always
+rm -f $BARNYARD_TEST_LOG
+:barnyard:run locale/apply
+invocations=( "${(@f)$(<$BARNYARD_TEST_LOG)}" )
+assert_equal 'always runs with a stale applied marker' 1 ${#invocations}
+:barnyard:run locale/apply
+invocations=( "${(@f)$(<$BARNYARD_TEST_LOG)}" )
+assert_equal 'always runs with a current marker and unchanged commit' 2 ${#invocations}
+
+write_manifest en_NZ.UTF-8 never barnyard.locale
+generate
+commit_configuration never
+o_barnyard[sha1]=$REPLY
+export BARNYARD_TEST_APPLY=never
+rm -f $BARNYARD_TEST_LOG
+:barnyard:run locale/apply
+invocations=()
+[[ ! -e $BARNYARD_TEST_LOG ]] ||
+    invocations=( "${(@f)$(<$BARNYARD_TEST_LOG)}" )
+assert_equal 'never does not dispatch' 0 ${#invocations}
 
 if (( failures )); then
     print -u 2 "$failures locale vertical assertion(s) failed"
