@@ -135,26 +135,6 @@ function barnyard_extract {
     esac
 }
 
-function barnyard_read_config_ {
-    typeset file=${2:-} regex='^([a-zA-Z_][a-zA-Z0-9_]*)=(.*)$' line
-    shift 2
-    while [[ $# -ne 0 ]]; do
-        barnyard_read_config[$1]=${2:-}
-        shift 2
-    done
-    while read -r line; do
-        [[ "$line" =~ $regex ]] || abend bad_config "$file"
-        barnyard_read_config[$match[1]]=$match[2]
-    done < "$file"
-}
-
-# TODO Tuck result into `o_barnyard`.
-function barnyard_read_config {
-    [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
-    typeset -A barnyard_read_config
-    barnyard_read_config_ "$@"
-    : ${(PA)${1:-reply}::=${(@kv)barnyard_read_config}}
-}
 
 
 function :extensions {
@@ -467,8 +447,10 @@ function :barnyard:apply:body {
     BARNYARD_TEMP=$(mktemp -d) || abend 'unable to create temporary directory'
     {
         barnyard_version_check
-        [[ -e /etc/barnyard/config ]] || abend 'no configuration'
-        barnyard_read_config o_barnyard /etc/barnyard/config hostname "$(</etc/hostname)" quiet $o_quiet "${(@kv)o_barnyard}"
+        [[ -e /etc/barnyard/branch ]] || abend 'branch is missing'
+        o_barnyard[branch]=$(</etc/barnyard/branch)
+        o_barnyard[hostname]=$(</etc/hostname)
+        o_barnyard[quiet]=$o_quiet
 
         [[ -v o_ref ]] && o_barnyard[branch]=$o_ref
 
@@ -761,11 +743,11 @@ function :execute:clone {
 function :barnyard:clone {
     typeset repository=${o_repository%\#*} branch=${o_repository##*\#}
     typeset ref=refs/heads/$branch
-    typeset tmp config
+    typeset tmp staged_branch
     tmp=$(mktemp -d /var/lib/barnyard/bootstrap.XXXXXX) ||
         abend 'unable to create a repository staging directory'
-    config=$(mktemp /etc/barnyard/config.XXXXXX) ||
-        { rm -rf "$tmp"; abend 'unable to create a staged Barnyard config' }
+    staged_branch=$(mktemp /etc/barnyard/branch.XXXXXX) ||
+        { rm -rf "$tmp"; abend 'unable to create a staged Barnyard branch' }
     {
         block 'clone'
         {
@@ -785,8 +767,8 @@ function :barnyard:clone {
                 git -C %q show-ref --verify --quiet %q
             }
             (){
-                % $branch $config
-                print branch=%q > %q
+                % $branch $staged_branch
+                print -r -- %q > %q
             }
             (){ [[ ! -e $tmp/previous ]] }
             (){
@@ -800,7 +782,7 @@ function :barnyard:clone {
                     return 1
                 fi
             }
-            (){ % $config; mv %q /etc/barnyard/config }
+            (){ % $staged_branch; mv %q /etc/barnyard/branch }
         } always {
             caught
         } > >(indent)

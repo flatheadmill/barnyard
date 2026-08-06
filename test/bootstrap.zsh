@@ -394,7 +394,7 @@ EOF
         968479A1AFF927E37D1A566BB5690EEEBB952194
     assert 'clone installs a bare mirror' \
         "$(git -C $tmp/root/var/lib/barnyard/repository rev-parse --is-bare-repository)" true
-    assert 'clone installs the branch config' "$(<$tmp/root/etc/barnyard/config)" branch=main
+    assert 'clone installs the branch file' "$(<$tmp/root/etc/barnyard/branch)" main
 
     typeset previous_head=$(git -C $tmp/root/var/lib/barnyard/repository rev-parse HEAD)
     invalid=$(printf '%s' "$real_payload" |
