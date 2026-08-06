@@ -460,7 +460,7 @@ function :barnyard:order:modules {
     done
 }
 
-function :barnyard:apply {
+function :barnyard:apply:body {
     typeset module
     umask 077
     export BARNYARD_TEMP
@@ -538,6 +538,57 @@ function :barnyard:apply {
     }
 }
 
+function :barnyard:apply {
+    zmodload zsh/system || abend 'unable to load zsh/system for the apply lock'
+
+    typeset lock=${o_barnyard[lock]:-/run/lock/barnyard.apply}
+    typeset lockfd holder
+    touch "$lock" || abend 'unable to create apply lock %s' "$lock"
+    if ! zsystem flock -t 0 -f lockfd "$lock" 2>/dev/null; then
+        holder=$(<"$lock") 2>/dev/null
+        [[ -n $holder ]] || holder='holder unknown'
+        abend 'another Barnyard apply is running (%s)' "$holder"
+    fi
+    holder="pid=$sysparams[pid] operation=${o_barnyard[operation]:-apply}"
+    ( print -r -- "$holder" ) >| "$lock" ||
+        abend 'unable to record holder in apply lock %s' "$lock"
+
+    {
+        :barnyard:apply:body "$@"
+    } always {
+        zsystem flock -u $lockfd
+    }
+}
+
+function :help:always {
+    heredoc -v help -q <<'    EOF'
+        # desc -- force modules to converge
+        Run the named modules regardless of their applied state.
+        # opt version
+        Require this Barnyard version on the machine.
+        # opt repository
+        Read Barnyard configuration and code from this repository.
+        # opt quiet
+        Suppress ordinary output.
+        # opt fetch
+        Fetch the repository before applying modules.
+        # opt check-signature
+        Verify the selected commits before extracting them.
+        # opt help
+        Display help for \`barnyard always\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard always\` converges the named modules even when their applied
+        markers say they have already run.
+
+        Apply operations are serialized across the machine. If another
+        \`apply\` or \`always\` operation holds the lock, this command fails
+        immediately and reports the holder's process ID and operation.
+        ## OPTIONS
+        > options
+    EOF
+}
+
 function :args:always {
     typeset o_repository=/var/lib/barnyard/repository
     integer o_check_signature=1
@@ -547,11 +598,45 @@ function :args:always {
 function :execute:always {
     typeset -A o_barnyard=(
         always yes
+        operation always
         repository ${o_repository:A}
         fetch $o_fetch
         limit $(( 16#7fffffffffffffff ))
     )
     :barnyard:apply "$@"
+}
+
+function :help:apply {
+    heredoc -v help -q <<'    EOF'
+        # desc -- converge the machine
+        Converge the machine from its generated configuration.
+        # opt limit
+        Stop after running this many modules.
+        # opt version
+        Require this Barnyard version on the machine.
+        # opt ref
+        Use this configuration ref for a dry run.
+        # opt repository
+        Read Barnyard configuration and code from this repository.
+        # opt dry-run
+        Report the modules that would run without running them.
+        # opt quiet
+        Suppress ordinary output.
+        # opt check-signature
+        Verify the selected commits before extracting them.
+        # opt help
+        Display help for \`barnyard apply\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard apply\` reads the generated machine configuration and
+        converges its modules in the recorded order.
+
+        Apply operations are serialized across the machine. If another
+        \`apply\` or \`always\` operation holds the lock, this command fails
+        immediately and reports the holder's process ID and operation.
+        ## OPTIONS
+        > options
+    EOF
 }
 
 function :args:apply {
@@ -566,6 +651,7 @@ function :execute:apply {
     (( $# )) && abend 'barnyard apply takes no positional arguments'
     typeset -A o_barnyard=(
         always no
+        operation apply
         repository "${o_repository:A}"
         dry_run $o_dry_run
         fetch 1
