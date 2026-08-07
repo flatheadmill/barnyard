@@ -4,7 +4,7 @@ zshctl[man_title]='Barnyard Manuals'
 
 # For the readme...
 #
-# * You can get the actual module using `_module`, while `module` is the name.
+# * The declaration gives an operator its name; `_operator` selects its implementation.
 # * `o_barnyard[barnyard]` is the repository and `o_barnyard[archive]` is the
 # directory where we extracted the barnyard version.
 
@@ -49,7 +49,7 @@ function :help {
 
         Barnyard reserves exactly five top-level words: \`control\`, \`agent\`,
         \`version\`, \`extend\`, and \`completions\`. Every other Unicode word
-        belongs to the user's modules. If Barnyard needs more of its own
+        belongs to the user's operators. If Barnyard needs more of its own
         vocabulary, it nests that work under a word it already owns instead of
         taking a sixth.
 
@@ -89,7 +89,7 @@ function :execute:version {
 }
 
 # TODO The string resources go away. No longer necessary because of zshctl.
-# Modules will have all these functions sourced and inherited.
+# Operators will have all these functions sourced and inherited.
 ___ barnyard_common ___
 typeset -A PRIORITY
 
@@ -143,7 +143,7 @@ function :extensions {
     if [[ -n ${BARNYARD_EXTENSION:-} ]]; then
         [[ -d $BARNYARD_EXTENSION &&
             -r $BARNYARD_EXTENSION/barnyard.extension.zsh ]] ||
-            abend 'invalid module extension %s' "$BARNYARD_EXTENSION"
+            abend 'invalid operator extension %s' "$BARNYARD_EXTENSION"
         extension=( "${BARNYARD_EXTENSION:A}" )
     fi
     command_path=( "$own" "${extension[@]}" )
@@ -200,11 +200,11 @@ function log {
         shift
     fi
 
-    # Create a template message. We do want level, module and message first
+    # Create a template message. We do want level, operator and message first
     # since that would probably be easiest to read in console spew.
     typeset message_index
-    if [[ -n ${BARNYARD_INSTANCE:-} ]]; then
-        fields=( level $priority module "$BARNYARD_INSTANCE" )
+    if [[ -n ${BARNYARD_OPERATOR:-} ]]; then
+        fields=( level $priority operator "$BARNYARD_OPERATOR" )
     else
         fields=( level $priority )
     fi
@@ -274,52 +274,52 @@ function log {
 function :barnyard:run {
     typeset -A barnyard
     typeset declaration=${1:-}
-    typeset code extension implementation instance marker mode operation state tape
+    typeset code extension implementation name marker mode operation state tape
     typeset -a applied diffs command
     integer record_applied
 
     [[ $declaration =~ '^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*(/[a-z][a-z0-9_-]*)?$' ]] ||
-        abend 'invalid module declaration %s' "$declaration"
+        abend 'invalid operator declaration %s' "$declaration"
 
     barnyard=( "${(@kv)o_barnyard}" )
-    instance=${declaration%%/*}
+    name=${declaration%%/*}
     operation=${declaration#*/}
     [[ $operation = $declaration ]] && operation=apply
-    barnyard[configuration]="$barnyard[archive]/conf/machines/$barnyard[hostname]/${instance}.json"
+    barnyard[configuration]="$barnyard[archive]/conf/machines/$barnyard[hostname]/${name}.json"
 
     [[ -e "$barnyard[configuration]" ]] ||
-        abend 'no configuration for module %s' "$instance"
-    tape=$(jq -er --arg implementation "barnyard.$instance" '
+        abend 'no configuration for operator %s' "$name"
+    tape=$(jq -er --arg implementation "barnyard.$name" '
         if type != "object" then
-            error("module configuration is not an object")
+            error("operator configuration is not an object")
         else
             (._apply // "once") as $apply |
-            (._module // $implementation) as $module |
+            (._operator // $implementation) as $operator |
             (._diff // []) as $diff |
             if
                 ($apply | type) != "string" or
-                ($module | type) != "string" or
+                ($operator | type) != "string" or
                 ($diff | type) != "array" or
                 (all($diff[]; type == "string") | not)
             then
                 error("invalid runner metadata")
             else
-                [$apply, $module, $diff[]] | @sh
+                [$apply, $operator, $diff[]] | @sh
             end
         end
     ' "$barnyard[configuration]") ||
-        abend 'invalid module configuration %s' "$barnyard[configuration]"
+        abend 'invalid operator configuration %s' "$barnyard[configuration]"
     set -- "${(@QA)${(z)tape}}"
     mode=${1:-}
     implementation=${2:-}
     shift 2
     diffs=( "$@" )
     [[ $implementation =~ '^barnyard(\.[a-z][a-z0-9_-]*)+$' ]] ||
-        abend 'invalid implementation %s for module %s' "$implementation" "$instance"
+        abend 'invalid implementation %s for operator %s' "$implementation" "$name"
 
     record_applied=$(( ${+barnyard[state]} ))
     state=${barnyard[state]:-/var/lib/barnyard}
-    marker="$state/applied/$instance"
+    marker="$state/applied/$name"
     mkdir -p "$state/applied"
     applied=()
 
@@ -331,52 +331,52 @@ function :barnyard:run {
     fi
     case "$o_barnyard[always]-$mode" in
         yes-* | *-always )
-            log run=1 ran=$ran module="$instance" program="$operation" apply=always msg= 'check dirty'
+            log run=1 ran=$ran operator="$name" program="$operation" apply=always msg= 'check dirty'
             ;;
         *-once )
             if (( $ran )); then
-                log run=0 ran=1 module="$instance" program="$operation" apply=once msg= 'check dirty'
+                log run=0 ran=1 operator="$name" program="$operation" apply=once msg= 'check dirty'
                 return
             fi
-            log run=1 ran=0 module="$instance" program="$operation" apply=once msg= 'check dirty'
+            log run=1 ran=0 operator="$name" program="$operation" apply=once msg= 'check dirty'
             ;;
         *-diff )
             if (( $ran )); then
                 read -r -A applied < "$marker"
                 if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
-                    log run=0 ran=1 module="$instance" program="$operation" apply=diff msg= 'check dirty'
+                    log run=0 ran=1 operator="$name" program="$operation" apply=diff msg= 'check dirty'
                     return
                 fi
-                diffs+=( "machines/$barnyard[hostname]/${instance}.json" )
+                diffs+=( "machines/$barnyard[hostname]/${name}.json" )
                 if git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
-                    log run=0 ran=1 module="$instance" program="$operation" apply=diff msg= 'check dirty'
+                    log run=0 ran=1 operator="$name" program="$operation" apply=diff msg= 'check dirty'
                     return
                 fi
-                log run=1 ran=1 module="$instance" program="$operation" apply=diff msg= 'check dirty'
+                log run=1 ran=1 operator="$name" program="$operation" apply=diff msg= 'check dirty'
             else
-                log run=1 ran=0 module="$instance" program="$operation" apply=diff msg= 'check dirty'
+                log run=1 ran=0 operator="$name" program="$operation" apply=diff msg= 'check dirty'
             fi
             ;;
         *-never )
-            log run=0 ran=$ran module="$instance" program="$operation" apply=never msg= 'check dirty'
+            log run=0 ran=$ran operator="$name" program="$operation" apply=never msg= 'check dirty'
             return
             ;;
         * )
-            abend 'invalid apply mode %s for module %s' "$mode" "$instance"
+            abend 'invalid apply mode %s for operator %s' "$mode" "$name"
             ;;
     esac
 
     (( barnyard[dry_run] || ! o_barnyard[limit] )) && return
 
     extension="${barnyard[archive]}/code/barnyard"
-    [[ -d $extension ]] || abend 'module extension missing at %s' "$extension"
+    [[ -d $extension ]] || abend 'operator extension missing at %s' "$extension"
 
     command=( "${(@s:.:)${implementation#barnyard.}}" "$operation" )
     if BARNYARD_ARCHIVE="$barnyard[archive]" \
         BARNYARD_CONFIGURATION="$barnyard[configuration]" \
         BARNYARD_EXTENSION="$extension" \
         BARNYARD_HOSTNAME="$barnyard[hostname]" \
-        BARNYARD_INSTANCE="$instance" \
+        BARNYARD_OPERATOR="$name" \
         BARNYARD_OPERATION="$operation" \
         "$BARNYARD_PATH/barnyard" "${command[@]}"; then
         code=0
@@ -385,7 +385,7 @@ function :barnyard:run {
     fi
 
     if (( code )); then
-        log err code=$code module="$instance" 'module %s exited %d' "$instance" $code
+        log err code=$code operator="$name" 'operator %s exited %d' "$name" $code
         return $code
     fi
 
@@ -394,7 +394,7 @@ function :barnyard:run {
         "$operation" = apply &&
         "$o_barnyard[always]" = no
     ]]; then
-        log module="$instance" "marking module %s as applied" "$instance"
+        log operator="$name" "marking operator %s as applied" "$name"
         git -C "$o_barnyard[repository]" log -n 1 --format='%H %at' "$barnyard[sha1]" > "${marker}.new" ||
             return 1
         mv -f "${marker}.new" "$marker"
@@ -412,9 +412,9 @@ function barnyard_version_check {
 # TODO Not sure, too, what this naming convention was about, but it is a pretty
 # strong indicator that this is an internal function. I suppose it keeps the
 # namespace really clean.
-function :barnyard:order:modules {
+function :barnyard:order:operators {
     typeset -a ordered
-    typeset module tape
+    typeset operator tape
 
     tape=$(jq -er '
         if
@@ -426,22 +426,22 @@ function :barnyard:order:modules {
         then
             @sh
         else
-            error("invalid module order")
+            error("invalid operator order")
         end
     ' "$o_barnyard[archive]/conf/machines/$o_barnyard[hostname]/order.json") ||
-        abend 'invalid module order for %s' "$o_barnyard[hostname]"
+        abend 'invalid operator order for %s' "$o_barnyard[hostname]"
     set -- "${(@QA)${(z)tape}}"
     ordered=( "$@" )
 
-    log info modules="${(j: :)ordered[@]}" 'running modules in order'
+    log info operators="${(j: :)ordered[@]}" 'running operators in order'
 
-    for module in "${(@)ordered}"; do
-        :barnyard:run "$module" || return 1
+    for operator in "${(@)ordered}"; do
+        :barnyard:run "$operator" || return 1
     done
 }
 
 function :barnyard:apply:body {
-    typeset module
+    typeset operator
     umask 077
     export BARNYARD_TEMP
     BARNYARD_TEMP=$(mktemp -d) || abend 'unable to create temporary directory'
@@ -487,12 +487,12 @@ function :barnyard:apply:body {
             barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
 
             if (( $# )); then
-                for module in "$@"; do
-                    :barnyard:run "$module" || exit 1
+                for operator in "$@"; do
+                    :barnyard:run "$operator" || exit 1
                 done
             else
-                [[ "$o_barnyard[always]" = no ]] || abend 'always requires specific modules to run'
-                :barnyard:order:modules
+                [[ "$o_barnyard[always]" = no ]] || abend 'always requires specific operators to run'
+                :barnyard:order:operators
             fi
         else
             [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
@@ -511,8 +511,8 @@ function :barnyard:apply:body {
             mkdir -p "$BARNYARD_TEMP/run"
             cp -R "$o_barnyard[repository]"/* "$BARNYARD_TEMP/run"
             o_barnyard[repository]="$o_barnyard[repository]/conf"
-            for module in "$@"; do
-                :barnyard:run $module || exit 1
+            for operator in "$@"; do
+                :barnyard:run $operator || exit 1
             done
         fi
     } always {
@@ -544,8 +544,8 @@ function :barnyard:apply {
 
 function :help:always {
     heredoc -v help -q <<'    EOF'
-        # desc -- force modules to converge
-        Run the named modules regardless of their applied state.
+        # desc -- force operators to converge
+        Run the named operators regardless of their applied state.
         # opt version
         Require this Barnyard version on the machine.
         # opt repository
@@ -553,14 +553,14 @@ function :help:always {
         # opt quiet
         Suppress ordinary output.
         # opt fetch
-        Fetch the repository before applying modules.
+        Fetch the repository before applying operators.
         # opt check-signature
         Verify the selected commits before extracting them.
         # opt help
         Display help for \`barnyard always\`.
         # man
         ## DESCRIPTION
-        \`barnyard always\` converges the named modules even when their applied
+        \`barnyard always\` converges the named operators even when their applied
         markers say they have already run.
 
         Apply operations are serialized across the machine. If another
@@ -593,7 +593,7 @@ function :help:apply {
         # desc -- converge the machine
         Converge the machine from its generated configuration.
         # opt limit
-        Stop after running this many modules.
+        Stop after running this many operators.
         # opt version
         Require this Barnyard version on the machine.
         # opt ref
@@ -601,7 +601,7 @@ function :help:apply {
         # opt repository
         Read Barnyard configuration and code from this repository.
         # opt dry-run
-        Report the modules that would run without running them.
+        Report the operators that would run without running them.
         # opt quiet
         Suppress ordinary output.
         # opt check-signature
@@ -611,7 +611,7 @@ function :help:apply {
         # man
         ## DESCRIPTION
         \`barnyard apply\` reads the generated machine configuration and
-        converges its modules in the recorded order.
+        converges its operators in the recorded order.
 
         Apply operations are serialized across the machine. If another
         \`apply\` or \`always\` operation holds the lock, this command fails
@@ -906,7 +906,7 @@ function :help:control:generate {
         ## DESCRIPTION
         \`barnyard control generate\` compiles one or more \`machines.zsh\`
         manifests into the per-machine JSON read by the Barnyard agent. It writes
-        one stable, sorted JSON file per instance and an ordered \`order.json\`
+        one stable, sorted JSON file per named operator and an ordered \`order.json\`
         beside them.
 
         Run this command from the configuration worktree. Regeneration replaces
@@ -964,14 +964,14 @@ function :barnyard:generate:values {
         shift
         case "$argument" in
             once | diff | always | never )
-                [[ $kind = module ]] || abend 'apply mode is not valid machine metadata'
+                [[ $kind = operator ]] || abend 'apply mode is not valid machine metadata'
                 [[ -z $mode ]] || abend 'multiple apply modes for %s' "$file"
                 mode=$argument
                 json=$(:barnyard:generate:json:set "$json" _apply "$argument") ||
                     abend 'invalid apply mode for %s' "$file"
                 ;;
             barnyard.* )
-                [[ $kind = module ]] || abend 'implementation is not valid machine metadata'
+                [[ $kind = operator ]] || abend 'implementation is not valid machine metadata'
                 [[ -z $implementation ]] || abend 'multiple implementations for %s' "$file"
                 [[ $argument =~ '^barnyard(\.[a-z][a-z0-9_-]*)+$' ]] ||
                     abend 'invalid implementation %s' "$argument"
@@ -1039,39 +1039,39 @@ function :barnyard:generate:machine {
             :barnyard:generate:values machine "machines/$hostname/machine.json" "$@"
             :barnyard:generate:json:write "machines/$hostname/machine.json" "$REPLY"
             jq -nS --args '$ARGS.positional' -- > "machines/$hostname/order.json" ||
-                abend 'unable to initialize module order for %s' "$hostname"
+                abend 'unable to initialize operator order for %s' "$hostname"
         fi
     fi
 }
 
-function :barnyard:generate:module {
+function :barnyard:generate:operator {
     (( __o_registers[excluded] )) && return
     typeset declaration=${1:-}
     shift
-    [[ -n $declaration ]] || abend 'module instance is required'
+    [[ -n $declaration ]] || abend 'operator name is required'
     if [[ $declaration = @* ]]; then
         "$declaration" "$@"
         return
     fi
 
     [[ $declaration =~ '^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*(/[a-z][a-z0-9_-]*)?$' ]] ||
-        abend 'invalid module declaration %s' "$declaration"
+        abend 'invalid operator declaration %s' "$declaration"
 
-    typeset instance=${declaration%%/*}
-    typeset file="machines/${o_barnyard[hostname]}/${instance}.json"
+    typeset name=${declaration%%/*}
+    typeset file="machines/${o_barnyard[hostname]}/${name}.json"
     typeset -a reply
-    :barnyard:generate:values module "$file" "$@"
+    :barnyard:generate:values operator "$file" "$@"
     typeset implementation=${reply[1]:-}
-    if [[ -n $implementation && $implementation != barnyard.$instance ]]; then
-        REPLY=$(:barnyard:generate:json:set "$REPLY" _module "$implementation") ||
-            abend 'invalid implementation for %s' "$instance"
+    if [[ -n $implementation && $implementation != barnyard.$name ]]; then
+        REPLY=$(:barnyard:generate:json:set "$REPLY" _operator "$implementation") ||
+            abend 'invalid implementation for %s' "$name"
     fi
     :barnyard:generate:json:write "$file" "$REPLY"
 
     __o_order+=( "$declaration" )
     jq -nS --args '$ARGS.positional' -- "${__o_order[@]}" \
         > "machines/${o_barnyard[hostname]}/order.json" ||
-            abend 'unable to write module order for %s' "$o_barnyard[hostname]"
+            abend 'unable to write operator order for %s' "$o_barnyard[hostname]"
 }
 
 function :barnyard:control:generate {
@@ -1082,7 +1082,7 @@ function :barnyard:control:generate {
 
     # The manifest's vocabulary lives only for this isolated compilation.
     function machine { :barnyard:generate:machine "$@" }
-    function @ { :barnyard:generate:module "$@" }
+    function @ { :barnyard:generate:operator "$@" }
     source "$configuration"
 }
 

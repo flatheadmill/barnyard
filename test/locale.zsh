@@ -79,12 +79,12 @@ cat > $tmp/bin/update-locale <<'EOF'
 set -eu
 jq -e --arg language "$BARNYARD_TEST_EXPECT" \
     --arg apply "$BARNYARD_TEST_APPLY" \
-    --arg module "$BARNYARD_TEST_MODULE" '
+    --arg operator "$BARNYARD_TEST_OPERATOR" '
     ._apply == $apply and
-    (if $module == "" then
-        (has("_module") | not)
+    (if $operator == "" then
+        (has("_operator") | not)
     else
-        ._module == $module
+        ._operator == $operator
     end) and
     .language == $language and
     .labels == ["alpha", "two words"]
@@ -93,7 +93,7 @@ jq -e --arg language "$BARNYARD_TEST_EXPECT" \
 [ "$BARNYARD_CONFIGURATION" = "$BARNYARD_TEST_CONFIGURATION" ]
 [ "$BARNYARD_EXTENSION" = "$BARNYARD_TEST_EXTENSION" ]
 [ "$BARNYARD_HOSTNAME" = "fixture.example" ]
-[ "$BARNYARD_INSTANCE" = "locale" ]
+[ "$BARNYARD_OPERATOR" = "locale" ]
 [ "$BARNYARD_OPERATION" = "apply" ]
 [ "${BARNYARD_ENVELOPE+x}" != x ]
 case "$(/usr/bin/env)" in
@@ -120,7 +120,7 @@ export BARNYARD_TEST_EXTENSION=$tmp/work/code/barnyard
 export BARNYARD_TEST_ARCHIVE=$tmp/work
 export BARNYARD_TEST_CONFIGURATION=$tmp/work/conf/machines/fixture.example/locale.json
 export BARNYARD_TEST_APPLY=diff
-export BARNYARD_TEST_MODULE=barnyard.system.locale
+export BARNYARD_TEST_OPERATOR=barnyard.system.locale
 
 write_manifest en_GB.UTF-8
 generate
@@ -134,7 +134,7 @@ EOF
 cat > $tmp/locale.expected.json <<'EOF'
 {
   "_apply": "diff",
-  "_module": "barnyard.system.locale",
+  "_operator": "barnyard.system.locale",
   "labels": [
     "alpha",
     "two words"
@@ -153,8 +153,8 @@ cat > $tmp/order.expected.json <<'EOF'
 ]
 EOF
 assert_file_equal 'machine metadata is normalized JSON' $tmp/machine.expected.json $tmp/work/conf/machines/fixture.example/machine.json
-assert_file_equal 'module configuration is normalized JSON' $tmp/locale.expected.json $tmp/work/conf/machines/fixture.example/locale.json
-assert_file_equal 'order contains only declared module instances' $tmp/order.expected.json $tmp/work/conf/machines/fixture.example/order.json
+assert_file_equal 'operator configuration is normalized JSON' $tmp/locale.expected.json $tmp/work/conf/machines/fixture.example/locale.json
+assert_file_equal 'order contains only declared operator names' $tmp/order.expected.json $tmp/work/conf/machines/fixture.example/order.json
 
 integer invalid=0
 for declaration in 'bad/too/many' 'Locale' 'locale barnyard.Locale' 'locale unexpected'; do
@@ -185,8 +185,8 @@ rm -f $tmp/work/conf/invalid.zsh
 rm -rf $tmp/work/conf/machines/invalid-*.example
 
 # Compile one manifest through the old and new recorders, then normalize the
-# two stores to the same meaning. The old synthetic `machine` module becomes
-# machine.json metadata and is not a converged instance in the new store.
+# two stores to the same meaning. The old recorder's synthetic `machine` module
+# becomes machine.json metadata and is not a named operator in the new store.
 mkdir -p $tmp/reference/{old,new}/{age,machines,resources}
 for directory in $tmp/reference/{old,new}; do
     cat > $directory/fixture.zsh <<'EOF'
@@ -207,34 +207,34 @@ typeset new=$tmp/reference/new/machines/fixture.example
 typeset old_declaration=$(
     sed -n 's/^module+=//p' $old/order | grep -v '^machine$'
 )
-typeset old_instance=${old_declaration%%/*}
+typeset old_name=${old_declaration%%/*}
 typeset old_operation=${old_declaration#*/}
 [[ $old_operation = $old_declaration ]] && old_operation=apply
-typeset old_implementation=$(sed -n 's/^_module=//p' $old/$old_instance)
-[[ -n $old_implementation ]] || old_implementation=barnyard.$old_instance
+typeset old_implementation=$(sed -n 's/^_module=//p' $old/$old_name)
+[[ -n $old_implementation ]] || old_implementation=barnyard.$old_name
 typeset labels=$(
-    sed -n 's/^labels+=//p' $old/$old_instance | jq -R . | jq -s .
+    sed -n 's/^labels+=//p' $old/$old_name | jq -R . | jq -s .
 )
 jq -nS \
     --arg code "$(sed -n 's/^code=//p' $old/machine)" \
     --arg bootstrap "$(sed -n 's/^bootstrap=//p' $old/machine)" \
-    --arg instance "$old_instance" \
+    --arg name "$old_name" \
     --arg implementation "$old_implementation" \
     --arg operation "$old_operation" \
-    --arg apply "$(sed -n 's/^_apply=//p' $old/$old_instance)" \
-    --arg language "$(sed -n 's/^language=//p' $old/$old_instance)" \
-    --arg region "$(sed -n 's/^region=//p' $old/$old_instance)" \
+    --arg apply "$(sed -n 's/^_apply=//p' $old/$old_name)" \
+    --arg language "$(sed -n 's/^language=//p' $old/$old_name)" \
+    --arg region "$(sed -n 's/^region=//p' $old/$old_name)" \
     --argjson labels "$labels" '
         {
             machine: { bootstrap: $bootstrap, code: $code },
             order: [
                 {
                     implementation: $implementation,
-                    instance: $instance,
+                    name: $name,
                     operation: $operation
                 }
             ],
-            modules: {
+            operators: {
                 locale: {
                     _apply: $apply,
                     labels: $labels,
@@ -246,7 +246,7 @@ jq -nS \
     ' > $tmp/reference/old.semantic.json
 jq -nS \
     --slurpfile machine $new/machine.json \
-    --slurpfile module $new/locale.json \
+    --slurpfile operator $new/locale.json \
     --slurpfile order $new/order.json '
         {
             machine: $machine[0],
@@ -254,12 +254,12 @@ jq -nS \
                 . as $declaration |
                 ($declaration | split("/")) as $parts |
                 {
-                    implementation: ($module[0]._module // ("barnyard." + $parts[0])),
-                    instance: $parts[0],
+                    implementation: ($operator[0]._operator // ("barnyard." + $parts[0])),
+                    name: $parts[0],
                     operation: ($parts[1] // "apply")
                 }
             )),
-            modules: { locale: ($module[0] | del(._module)) }
+            operators: { locale: ($operator[0] | del(._operator)) }
         }
     ' > $tmp/reference/new.semantic.json
 assert_file_equal 'old and new recorders compile the same manifest meaning' \
@@ -293,7 +293,7 @@ typeset -gA o_barnyard=(
 )
 typeset -a invocations marker
 
-:barnyard:order:modules
+:barnyard:order:operators
 invocations=( "${(@f)$(<$BARNYARD_TEST_LOG)}" )
 marker=( "${(z)$(< $tmp/state/applied/locale)}" )
 assert_equal 'locale command dispatches once' 1 ${#invocations}
@@ -340,14 +340,14 @@ typeset once_sha=$REPLY
 o_barnyard[sha1]=$once_sha
 export BARNYARD_TEST_EXPECT=en_NZ.UTF-8
 export BARNYARD_TEST_APPLY=once
-export BARNYARD_TEST_MODULE=
+export BARNYARD_TEST_OPERATOR=
 rm -f $tmp/state/applied/locale $BARNYARD_TEST_LOG
-if jq -e 'has("_module") | not' \
+if jq -e 'has("_operator") | not' \
     $tmp/work/conf/machines/fixture.example/locale.json > /dev/null
 then
-    pass 'default implementation is omitted from module configuration'
+    pass 'default implementation is omitted from operator configuration'
 else
-    fail 'default implementation is omitted from module configuration'
+    fail 'default implementation is omitted from operator configuration'
 fi
 :barnyard:run locale/apply
 invocations=( "${(@f)$(<$BARNYARD_TEST_LOG)}" )
