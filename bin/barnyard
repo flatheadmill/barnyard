@@ -1151,16 +1151,19 @@ function :execute:control:bootstrap {
         [[ -v o_branch && -n $o_branch ]] || abend 'a repository branch is required with --repository'
     fi
 
-    typeset file destination_host=${o_destination##*@}
-    [[ -n $destination_host ]] || abend 'unable to derive the expected hostname'
+    typeset file
     for file in "${(@)o_gpg}"; do
         [[ -r $file ]] || abend 'GPG public key file is not readable: %s' "$file"
     done
 
+    # The payload carries material, not claims about the machine. A machine
+    # knows its own hostname from Terraform and its own distribution from
+    # /etc/os-release, and the control side has no independent source for
+    # either, so any assertion it sent would be a guess wearing a check.
+    # Reaching the intended machine is already settled one layer down, where
+    # :barnyard:control:send pins the host key with StrictHostKeyChecking.
     typeset -a properties=(
         -s "version=$BARNYARD_VERSION"
-        -s "expect.hostname=$destination_host"
-        -s 'expect.distribution=ubuntu'
     )
     [[ -v o_known ]] && properties+=( "ssh.known_hosts=@$o_known" )
     [[ -v o_ssh ]] && properties+=( "ssh.private_key=@$o_ssh" )
@@ -1302,9 +1305,13 @@ function :help:agent:bootstrap {
         # man
         ## DESCRIPTION
         \`barnyard agent bootstrap\` validates one complete JSON description
-        before writing machine state. It checks the intended host, then applies
-        whichever SSH, GPG, and repository properties are present in order.
-        Absent properties remain unmanaged.
+        before writing machine state, then applies whichever SSH, GPG, and
+        repository properties are present in order. Absent properties remain
+        unmanaged.
+
+        The payload carries material only. A machine's hostname and
+        distribution are its own, so the control side does not assert them
+        and the agent does not check them against a claim.
 
         A failed run stops at the first failed applier. Re-running converges the
         provisioning artifacts; it does not regenerate the machine's identity.
@@ -1330,13 +1337,6 @@ function :barnyard:hostname {
     print -r -- "$(</etc/hostname)"
 }
 
-function :barnyard:distribution {
-    [[ -r /etc/os-release ]] || abend 'unable to read /etc/os-release'
-    typeset os_release=$(</etc/os-release)
-    typeset distribution=${${(M)${(f)os_release}:#ID=*}#ID=}
-    print -r -- "${distribution//\"/}"
-}
-
 function :barnyard:agent:bootstrap {
     setopt localoptions pipefail
     umask 077
@@ -1348,8 +1348,8 @@ function :barnyard:agent:bootstrap {
     printf '%s' "$payload" | jq -e '
         def keys_are($allowed): ((keys - $allowed) | length) == 0;
         type == "object" and
-        keys_are([ "expect", "gpg", "repository", "ssh", "version" ]) and
-        has("version") and has("expect") and
+        keys_are([ "gpg", "repository", "ssh", "version" ]) and
+        has("version") and
         (has("ssh") or has("gpg") or has("repository")) and
         (.version | type == "string" and length > 0) and
         ((has("ssh") | not) or
@@ -1373,32 +1373,13 @@ function :barnyard:agent:bootstrap {
             (.repository | type == "object" and
                 ((keys | sort) == [ "branch", "url" ]) and
                 (.url | type == "string" and length > 0 and (contains("#") | not)) and
-                (.branch | type == "string" and length > 0 and (contains("#") | not)))) and
-        (.expect | type == "object" and
-            ((keys | sort) == [ "distribution", "hostname" ]) and
-            (.hostname | type == "string" and length > 0) and
-            (.distribution | type == "string" and length > 0))
+                (.branch | type == "string" and length > 0 and (contains("#") | not))))
     ' > /dev/null || abend 'invalid bootstrap payload'
 
     typeset o_version
     o_version=$(printf '%s' "$payload" | jq -er '.version') ||
         abend 'unable to read the bootstrap version'
     barnyard_version_check
-
-    typeset expected_hostname expected_distribution actual_hostname actual_distribution
-    expected_hostname=$(printf '%s' "$payload" | jq -er '.expect.hostname') ||
-        abend 'unable to read the expected hostname'
-    actual_hostname=$(:barnyard:hostname) || abend 'unable to determine the hostname'
-    [[ $actual_hostname = $expected_hostname ]] ||
-        abend 'expected host %s, found %s' "$expected_hostname" "$actual_hostname"
-
-    expected_distribution=$(printf '%s' "$payload" | jq -er '.expect.distribution') ||
-        abend 'unable to read the expected distribution'
-    actual_distribution=$(:barnyard:distribution) ||
-        abend 'unable to determine the distribution'
-    [[ $actual_distribution = $expected_distribution ]] ||
-        abend 'expected distribution %s, found %s' \
-            "$expected_distribution" "$actual_distribution"
 
     integer index count
     typeset preflight key_listing line fingerprint
@@ -1486,7 +1467,9 @@ function :barnyard:agent:bootstrap {
     done
 
     typeset repository branch
-    typeset -a log_fields=( status=success operation=bootstrap hostname=$expected_hostname )
+    typeset hostname
+    hostname=$(:barnyard:hostname) || abend 'unable to determine the hostname'
+    typeset -a log_fields=( status=success operation=bootstrap hostname=$hostname )
     if printf '%s' "$payload" | jq -e 'has("repository")' > /dev/null; then
         repository=$(printf '%s' "$payload" | jq -er '.repository.url') ||
             abend 'unable to read the repository URL'

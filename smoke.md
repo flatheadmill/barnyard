@@ -62,7 +62,7 @@ The configuration chooses the code ref explicitly. Both selected tips are signed
 
 5. The Git container starts with the bare repository, generated host key, and deploy public key. Before bootstrap, the rig establishes that the Ubuntu machine resolves the exact repository hostname. The pinned `known_hosts` line is constructed from the generated host public key rather than learned by trusting a network scan.
 
-6. `barnyard control bootstrap` sends one payload containing the Git server's pinned host identity, the deploy private key, the OpenPGP public key and fingerprint, the repository URL, the configuration branch, and the explicit expected machine hostname once Barnyard exposes that field. The agent validates version, distribution, and hostname before installing trust and access, cloning the repository over SSH, and recording the selected branch.
+6. `barnyard control bootstrap` sends one payload containing the Git server's pinned host identity, the deploy private key, the OpenPGP public key and fingerprint, the repository URL, and the configuration branch. The agent validates the version and the payload shape before installing trust and access, cloning the repository over SSH, and recording the selected branch.
 
 7. The driver checks the provisioning products without substituting for them: the installed executable and machine identity, Git `known_hosts`, deploy private key, Barnyard GPG keyring, bare mirror, and branch file. The checks establish that bootstrap created the state apply depends on; they do not rewrite or repair it.
 
@@ -110,7 +110,7 @@ It does not prove performance, resource ceilings, network partitions, repository
 
 ## Known conditions
 
-**Destination and identity are currently conflated.** Bootstrap derives the expected hostname from the text after `@` in the SSH destination. The valid OrbStack destination `barnyard@orb` therefore implies `orb`, while `/etc/hostname` correctly says `barnyard`. A transport alias named `barnyard` would hide this defect. The rig depends instead on Barnyard gaining an explicit expected-hostname input so transport addressing and machine identity remain separate contracts.
+**The payload carries material, not claims about the machine.** Bootstrap once derived an expected hostname from the text after `@` in the SSH destination and sent it for the agent to check. The OrbStack destination `barnyard@orb` implies `orb` while `/etc/hostname` says `barnyard`, so the rig would have failed a correct machine. The expectation block is gone rather than made explicit: a machine's hostname comes from Terraform and its distribution from `/etc/os-release`, the control side has no independent source for either, and reaching the intended machine is settled by the pinned host key on the SSH connection. The rig therefore needs no expected-hostname input, and the OrbStack destination may differ from the machine name without arrangement.
 
 **The SSH-signing lane must currently fail.** The runner points Git's SSH allowed-signers file at `/dev/null`, and bootstrap has no allowed-signers property. OpenPGP signing provides the initial green route. SSH signing remains a named diagnostic until Barnyard can provision and select explicit SSH commit trust.
 
@@ -122,4 +122,4 @@ It does not prove performance, resource ceilings, network partitions, repository
 
 **Machine identity retrieval is manual.** Agent preparation creates the Barnyard commit archive, but the current road has no control-side command that retrieves it. The driver reaches the existing agent command over SSH and unpacks the public result. Keeping this transfer visible is preferable to mounting the machine filesystem, which would prove a different path.
 
-**The short hostname is load-bearing.** The machine is named `barnyard`, `/etc/hostname` is `barnyard`, bootstrap expects `barnyard`, and generated configuration lives under `conf/machines/barnyard`. The Git server may use an OrbStack FQDN because that name belongs to repository transport; the machine identity may not be silently expanded to one.
+**The short hostname is load-bearing.** The machine is named `barnyard`, `/etc/hostname` is `barnyard`, and generated configuration lives under `conf/machines/barnyard`. Apply reads `/etc/hostname` to find that directory, so the name on the machine and the name in the compiler's output are the same string or the run finds nothing. The Git server may use an OrbStack FQDN because that name belongs to repository transport; the machine identity may not be silently expanded to one.

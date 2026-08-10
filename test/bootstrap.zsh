@@ -66,7 +66,6 @@ function probe_receiver {
             source bin/barnyard
             function abend { print -u 2 -- "$*"; exit 1 }
             function :barnyard:hostname { print bench.invalid }
-            function :barnyard:distribution { print ubuntu }
             function exemplar { "$@" }
             function :barnyard:ssh:known-hosts {
                 cat > /dev/null
@@ -109,7 +108,6 @@ function run_real_receiver {
             typeset -A zshctl
             source bin/barnyard
             function :barnyard:hostname { print bench.invalid }
-            function :barnyard:distribution { print ubuntu }
 
             typeset name body
             typeset root_check='"'"'(( $EUID == 0 ))'"'"'
@@ -209,8 +207,7 @@ EOF
             "repository": {
                 "url": "git@github.com:example/barnyard-configuration.git",
                 "branch": "production"
-            },
-            "expect": { "hostname": "bench.invalid", "distribution": "ubuntu" }
+            }
         }
     ' <<< $payload > /dev/null
     assert 'control sends one bootstrap payload' "${$(wc -l < $tmp/capture/calls)// /}" 1
@@ -229,8 +226,7 @@ EOF
     jq -e --arg gpg "$(<$fixture)" '
         . == {
             "version": "0.26.0",
-            "gpg": { "import": [ $gpg ] },
-            "expect": { "hostname": "bench.invalid", "distribution": "ubuntu" }
+            "gpg": { "import": [ $gpg ] }
         }
     ' <<< $partial > /dev/null
     assert 'control sends a one-property payload' "${$(wc -l < $tmp/capture/calls)// /}" 1
@@ -303,15 +299,10 @@ EOF
     assert_not 'unknown nested field is rejected' "$out" '*RECEIVER_STATUS=0*'
     assert_not 'unknown nested field rejects before dispatch' "$out" '*APPLY_*'
 
-    invalid=$(printf '%s' "$payload" | jq '.expect.hostname = "wrong.invalid"')
+    invalid=$(printf '%s' "$payload" | jq '.expect = { "hostname": "bench.invalid" }')
     out=$(probe_receiver "$invalid")
-    assert_not 'wrong host is rejected' "$out" '*RECEIVER_STATUS=0*'
-    assert_not 'wrong host rejects before dispatch' "$out" '*APPLY_*'
-
-    invalid=$(printf '%s' "$payload" | jq '.expect.distribution = "wrong"')
-    out=$(probe_receiver "$invalid")
-    assert_not 'wrong distribution is rejected' "$out" '*RECEIVER_STATUS=0*'
-    assert_not 'wrong distribution rejects before dispatch' "$out" '*APPLY_*'
+    assert_not 'an expectation block is rejected' "$out" '*RECEIVER_STATUS=0*'
+    assert_not 'an expectation block rejects before dispatch' "$out" '*APPLY_*'
 
     invalid=$(printf '%s' "$payload" | jq '.version = "9.9.9"')
     out=$(probe_receiver "$invalid")
@@ -332,20 +323,18 @@ EOF
     assert_not 'empty payload rejects before dispatch' "$out" '*APPLY_*'
 
     partial=$(jo -d. -- -s version=$barnyard_version \
-        -s expect.hostname=bench.invalid -s expect.distribution=ubuntu \
         -s 'gpg.trust[]=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
     out=$(probe_receiver "$partial")
     assert_not 'trust without an available key is rejected' "$out" '*RECEIVER_STATUS=0*'
     assert_not 'unavailable trust rejects before dispatch' "$out" '*APPLY_*'
 
     partial=$(jo -d. -- -s version=$barnyard_version \
-        -s expect.hostname=bench.invalid -s expect.distribution=ubuntu)
+       )
     out=$(probe_receiver "$partial")
     assert_not 'receiver rejects a no-op payload' "$out" '*RECEIVER_STATUS=0*'
     assert_not 'receiver no-op runs no applier' "$out" '*APPLY_*'
 
     partial=$(jo -d. -- -s version=$barnyard_version \
-        -s expect.hostname=bench.invalid -s expect.distribution=ubuntu \
         -s repository.url=git@example.invalid:repo)
     out=$(probe_receiver "$partial")
     assert_not 'receiver rejects a repository half-pair' "$out" '*RECEIVER_STATUS=0*'
