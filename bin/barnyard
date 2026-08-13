@@ -418,13 +418,17 @@ function :barnyard:order:operators {
 
     tape=$(jq -er '
         if
-            type == "array" and
-            all(.[];
-                type == "string" and
-                test("^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*(/[a-z][a-z0-9_-]*)?$")
+            type == "object" and
+            (keys == [ "order" ]) and
+            (.order |
+                type == "array" and
+                all(.[];
+                    type == "string" and
+                    test("^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*(/[a-z][a-z0-9_-]*)?$")
+                )
             )
         then
-            @sh
+            .order | @sh
         else
             error("invalid operator order")
         end
@@ -1038,7 +1042,7 @@ function :barnyard:generate:machine {
             mkdir -p "machines/$hostname"
             :barnyard:generate:values machine "machines/$hostname/machine.json" "$@"
             :barnyard:generate:json:write "machines/$hostname/machine.json" "$REPLY"
-            jq -nS --args '$ARGS.positional' -- > "machines/$hostname/order.json" ||
+            jq -nS --args '{ order: $ARGS.positional }' -- > "machines/$hostname/order.json" ||
                 abend 'unable to initialize operator order for %s' "$hostname"
         fi
     fi
@@ -1069,7 +1073,7 @@ function :barnyard:generate:operator {
     :barnyard:generate:json:write "$file" "$REPLY"
 
     __o_order+=( "$declaration" )
-    jq -nS --args '$ARGS.positional' -- "${__o_order[@]}" \
+    jq -nS --args '{ order: $ARGS.positional }' -- "${__o_order[@]}" \
         > "machines/${o_barnyard[hostname]}/order.json" ||
             abend 'unable to write operator order for %s' "$o_barnyard[hostname]"
 }

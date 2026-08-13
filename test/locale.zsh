@@ -148,9 +148,11 @@ cat > $tmp/locale.expected.json <<'EOF'
 }
 EOF
 cat > $tmp/order.expected.json <<'EOF'
-[
-  "locale/apply"
-]
+{
+  "order": [
+    "locale/apply"
+  ]
+}
 EOF
 assert_file_equal 'machine metadata is normalized JSON' $tmp/machine.expected.json $tmp/work/conf/machines/fixture.example/machine.json
 assert_file_equal 'operator configuration is normalized JSON' $tmp/locale.expected.json $tmp/work/conf/machines/fixture.example/locale.json
@@ -250,7 +252,7 @@ jq -nS \
     --slurpfile order $new/order.json '
         {
             machine: $machine[0],
-            order: ($order[0] | map(
+            order: ($order[0].order | map(
                 . as $declaration |
                 ($declaration | split("/")) as $parts |
                 {
