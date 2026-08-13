@@ -928,6 +928,85 @@ function :args:control:generate {
     eval "$(args -@ -d i,include e,exclude -bx h,help -- "$@")"
 }
 
+function :barnyard:generate:args {
+    typeset argument key value variable
+    typeset -A arguments arrays associative_arrays scalars
+    typeset -a array remainder
+
+    while (( $# )); do
+        argument=$1
+        shift
+        case "$argument" in
+            %* )
+                key=${argument#%}
+                if [[ ! $key =~ '^[a-zA-Z_][a-zA-Z0-9_]*$' ]]; then
+                    print -R "abend 'invalid role macro argument %s' ${(q)argument}"
+                    return
+                fi
+                # An undefined name expands to a single empty word, which
+                # would be emitted as an odd-length associative assignment.
+                # The eval of that dies as a parse error, and a parse error
+                # discards the whole eval program, so every other assignment
+                # in this call is lost and the macro runs on with its
+                # defaults and no failure anywhere. Refuse the name instead,
+                # the way the operator parser refuses it.
+                if (( ! ${+parameters[$key]} )); then
+                    print -R "abend 'unknown associative array %s' ${(q)key}"
+                    return
+                fi
+                associative_arrays[$key]=1
+                if (( ${+arguments[$key]} )); then
+                    array=( "${(@Q)${(@z)arguments[$key]}}" )
+                else
+                    array=()
+                fi
+                array+=( "${(@kv)${(P)key}}" )
+                arguments[$key]="${(@qq)array}"
+                ;;
+            *=* )
+                key=${argument%%=*}
+                value=${argument#*=}
+                if [[ $key = *+ ]]; then
+                    key=${key%+}
+                    if [[ ! $key =~ '^[a-zA-Z_][a-zA-Z0-9_]*$' ]]; then
+                        print -R "abend 'invalid role macro argument %s' ${(q)argument}"
+                        return
+                    fi
+                    arrays[$key]=1
+                    if (( ${+arguments[$key]} )); then
+                        array=( "${(@Q)${(@z)arguments[$key]}}" )
+                    else
+                        array=()
+                    fi
+                    array+=( "$value" )
+                    arguments[$key]="${(@qq)array}"
+                else
+                    if [[ ! $key =~ '^[a-zA-Z_][a-zA-Z0-9_]*$' ]]; then
+                        print -R "abend 'invalid role macro argument %s' ${(q)argument}"
+                        return
+                    fi
+                    scalars[$key]=1
+                    arguments[$key]=${value:q}
+                fi
+                ;;
+            * )
+                remainder+=( "$argument" )
+                ;;
+        esac
+    done
+
+    for variable in "${(@k)associative_arrays}"; do
+        print -R "typeset -A $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)arrays}"; do
+        print -R "typeset -a $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)scalars}"; do
+        print -R "typeset $variable=$arguments[$variable]"
+    done
+    print -R "set -- ${(@qq)remainder}"
+}
+
 function :barnyard:generate:json:set {
     typeset json=${1:-} key=${2:-} value=${3:-}
     jq -ceS --arg key "$key" --arg value "$value" '
@@ -1087,6 +1166,10 @@ function :barnyard:control:generate {
     # The manifest's vocabulary lives only for this isolated compilation.
     function machine { :barnyard:generate:machine "$@" }
     function @ { :barnyard:generate:operator "$@" }
+    function @_args { :barnyard:generate:args "$@" }
+    function command_not_found_handler {
+        abend 'manifest called undefined function %s' "$1"
+    }
     source "$configuration"
 }
 

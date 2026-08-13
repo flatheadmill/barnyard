@@ -186,6 +186,111 @@ done
 rm -f $tmp/work/conf/invalid.zsh
 rm -rf $tmp/work/conf/machines/invalid-*.example
 
+cat > $tmp/work/conf/macro.zsh <<'EOF'
+    function @configured {
+        typeset language empty=not-empty labels=()
+        eval "$(@_args "$@")"
+        @ locale language=$language empty=$empty labels@=labels
+    }
+    machine direct.example
+    @ locale 'language=en=NZ UTF-8' empty= labels+='alpha=one' 'labels+=two words'
+    machine macro.example
+    @ @configured 'language=en=NZ UTF-8' empty= labels+='alpha=one' 'labels+=two words'
+EOF
+(cd $tmp/work/conf && $barnyard control generate macro.zsh)
+assert_file_equal 'role macro assignments match direct operator configuration' \
+    $tmp/work/conf/machines/direct.example/locale.json \
+    $tmp/work/conf/machines/macro.example/locale.json
+
+cat > $tmp/work/conf/splice.zsh <<'EOF'
+    typeset -A settings=( region west )
+    function @spliced {
+        eval "$(@_args "$@")"
+        settings[materialized]=yes
+        @ locale %settings
+    }
+    machine splice.example
+    @ @spliced %settings
+    (( ! ${+settings[materialized]} )) || return 1
+EOF
+(cd $tmp/work/conf && $barnyard control generate splice.zsh)
+cat > $tmp/splice.expected.json <<'EOF'
+{
+  "materialized": "yes",
+  "region": "west"
+}
+EOF
+assert_file_equal 'role macro map splice materializes a local associative array' \
+    $tmp/splice.expected.json $tmp/work/conf/machines/splice.example/locale.json
+
+cat > $tmp/work/conf/undefined-map.zsh <<'EOF'
+    function @undefined_map {
+        eval "$(@_args "$@")"
+        @ locale language=reached
+    }
+    machine undefined-map.example
+    @ @undefined_map %nosuch
+EOF
+typeset undefined_map_output
+if undefined_map_output=$(cd $tmp/work/conf &&
+    $barnyard control generate undefined-map.zsh 2>&1)
+then
+    fail 'undefined role macro map makes generate fail'
+else
+    pass 'undefined role macro map makes generate fail'
+fi
+if [[ $undefined_map_output = *nosuch* ]]; then
+    pass 'undefined role macro map error names the map'
+else
+    fail 'undefined role macro map error names the map'
+fi
+if [[ -e $tmp/work/conf/machines/undefined-map.example/locale.json ]]; then
+    fail 'undefined role macro map records no operator'
+else
+    pass 'undefined role macro map records no operator'
+fi
+
+cat > $tmp/work/conf/invalid-key.zsh <<'EOF'
+    function @invalid_key {
+        eval "$(@_args "$@")"
+    }
+    machine invalid-key.example
+    @ @invalid_key valid=value bad-key=value
+EOF
+typeset invalid_key_output
+if invalid_key_output=$(cd $tmp/work/conf &&
+    $barnyard control generate invalid-key.zsh 2>&1)
+then
+    fail 'invalid role macro key makes generate fail'
+else
+    pass 'invalid role macro key makes generate fail'
+fi
+if [[ $invalid_key_output = *bad-key=value* ]]; then
+    pass 'invalid role macro key error names its token'
+else
+    fail 'invalid role macro key error names its token'
+fi
+
+cat > $tmp/work/conf/missing-function.zsh <<'EOF'
+    machine missing-function.example
+    missing_manifest_helper
+EOF
+typeset missing_function_output
+if missing_function_output=$(cd $tmp/work/conf &&
+    $barnyard control generate missing-function.zsh 2>&1)
+then
+    fail 'undefined manifest function makes generate fail'
+else
+    pass 'undefined manifest function makes generate fail'
+fi
+if [[ $missing_function_output = *missing_manifest_helper* ]]; then
+    pass 'undefined manifest function error names the function'
+else
+    fail 'undefined manifest function error names the function'
+fi
+rm -f $tmp/work/conf/{macro,splice,invalid-key,missing-function}.zsh
+rm -rf $tmp/work/conf/machines/{direct,macro,splice,invalid-key,missing-function}.example
+
 # Compile one manifest through the old and new recorders, then normalize the
 # two stores to the same meaning. The old recorder's synthetic `machine` module
 # becomes machine.json metadata and is not a named operator in the new store.
