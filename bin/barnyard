@@ -1107,9 +1107,14 @@ function :barnyard:generate:machine {
     typeset hostname=${1:-}
     shift
     typeset disabled=$@[(Ie)enabled=0]
+    typeset tape
     o_barnyard[hostname]=$hostname
     __o_registers[excluded]=1
     __o_order=()
+    # Cleared for every declaration, including the ones this run skips, so a
+    # role called under a later machine cannot read metadata left behind by an
+    # earlier one.
+    o_machine=()
     if [[ $hostname = $~o_barnyard[include] &&
         ( -z $o_barnyard[exclude] || $hostname != $~o_barnyard[exclude] ) ]]
     then
@@ -1121,6 +1126,15 @@ function :barnyard:generate:machine {
             mkdir -p "machines/$hostname"
             :barnyard:generate:values machine "machines/$hostname/machine.json" "$@"
             :barnyard:generate:json:write "machines/$hostname/machine.json" "$REPLY"
+            # Role macros are promised the machine's metadata before they are
+            # expanded, and read it to decide what to record -- whether a
+            # machine is still bootstrapping decides whether its role declares
+            # sshpop. The values come back out of the compiled object rather
+            # than off the declaration a second time, so there is one reading
+            # of the manifest line and the roles see exactly what was written.
+            tape=$(jq -er 'to_entries | map(.key, .value) | @sh' <<< "$REPLY") ||
+                abend 'unable to read machine metadata for %s' "$hostname"
+            o_machine=( "${(@QA)${(z)tape}}" )
             jq -nS --args '{ order: $ARGS.positional }' -- > "machines/$hostname/order.json" ||
                 abend 'unable to initialize operator order for %s' "$hostname"
         fi
@@ -1158,9 +1172,18 @@ function :barnyard:generate:operator {
 }
 
 function :barnyard:control:generate {
+    # A manifest is a program, and sourcing one runs its statements to the end
+    # whatever they return, so a role that fails and a later line that succeeds
+    # leave the source reporting the last line. That is a compile that wrote
+    # part of a machine and called it a success. err_return is dynamically
+    # scoped, so it reaches the roles the manifest calls as well as the
+    # manifest itself, and an unhandled failure returns through the role, the
+    # recorder, the source and the compiling subshell.
+    setopt localoptions err_return
     typeset include=${1:-\*} exclude=${2:-} configuration=${3:-}
     typeset -A o_barnyard=( include "$include" exclude "$exclude" )
     typeset -A __o_registers=( excluded 1 )
+    typeset -A o_machine
     typeset -a __o_order
 
     # The manifest's vocabulary lives only for this isolated compilation.

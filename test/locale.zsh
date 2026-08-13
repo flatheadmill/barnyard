@@ -223,6 +223,48 @@ EOF
 assert_file_equal 'role macro map splice materializes a local associative array' \
     $tmp/splice.expected.json $tmp/work/conf/machines/splice.example/locale.json
 
+cat > $tmp/work/conf/metadata.zsh <<'EOF'
+    function @conditional {
+        eval "$(@_args "$@")"
+        if [[ $o_machine[bootstrap] != 1 ]]; then
+            @ locale language=converged
+        fi
+    }
+    machine bootstrapping.example code=topic/x bootstrap=1
+    @ @conditional
+    machine converged.example code=topic/x
+    @ @conditional
+EOF
+(cd $tmp/work/conf && $barnyard control generate metadata.zsh)
+if [[ -e $tmp/work/conf/machines/bootstrapping.example/locale.json ]]; then
+    fail 'a role reads machine metadata to decide what it records'
+else
+    pass 'a role reads machine metadata to decide what it records'
+fi
+if [[ -e $tmp/work/conf/machines/converged.example/locale.json ]]; then
+    pass 'machine metadata does not carry into the next declaration'
+else
+    fail 'machine metadata does not carry into the next declaration'
+fi
+
+cat > $tmp/work/conf/failing-role.zsh <<'EOF'
+    function @failing { return 1 }
+    machine failing-role.example
+    @ @failing
+    @ locale language=reached
+EOF
+if (cd $tmp/work/conf && $barnyard control generate failing-role.zsh > /dev/null 2>&1)
+then
+    fail 'a failing role makes generate fail'
+else
+    pass 'a failing role makes generate fail'
+fi
+if [[ -e $tmp/work/conf/machines/failing-role.example/locale.json ]]; then
+    fail 'a failing role stops the manifest'
+else
+    pass 'a failing role stops the manifest'
+fi
+
 cat > $tmp/work/conf/undefined-map.zsh <<'EOF'
     function @undefined_map {
         eval "$(@_args "$@")"
