@@ -40,9 +40,9 @@ A generated OpenPGP key signs the configuration and code tips. Its private half 
 
 The machine creates its own age identity during preparation. Its private key remains at `/etc/barnyard/age`; the public identity returned through Barnyard's commit output is placed at `conf/age/barnyard` before the final configuration is compiled. The fixture need not consume an age-encrypted value for this round trip to prove that machine identity is created on the agent side and returned to the control side without exposing the private key.
 
-An SSH commit-signing key is a separate role again. It is not the deploy key and not the server host key. The current runner cannot trust it because Barnyard has no allowed-signers bootstrap property and points Git's SSH allowed-signers file at `/dev/null`; the rig preserves this as an explicit diagnostic lane rather than weakening the green OpenPGP path.
+An SSH commit-signing key is a separate role again. It is not the deploy key and not the server host key. Bootstrap installs its explicit principal and public key in `/etc/barnyard/allowed_signers`, and the runner points Git at that file when it verifies an SSH-signed tip.
 
-The resulting trust graph is narrow. OrbStack authorizes the control side to reach the machine. The Git server authorizes the machine's deploy public key. The machine pins the Git server host key. The machine trusts the synthetic OpenPGP commit signer. The configuration and code tips are signed by the corresponding private key held only in rig state. None of these roles borrows another role's key.
+The resulting trust graph is narrow. OrbStack authorizes the control side to reach the machine. The Git server authorizes the machine's deploy public key. The machine pins the Git server host key. The machine trusts the synthetic OpenPGP and SSH commit signers through their separate trust stores. The configuration and code tips are signed by the corresponding private key held only in rig state. None of these roles borrows another role's key.
 
 ## Repository construction
 
@@ -76,11 +76,11 @@ The configuration chooses the code ref explicitly. Both selected tips are signed
 
 ## Signature lanes
 
-The required green lane uses OpenPGP-signed configuration and code tips because bootstrap and the current runner already share that trust contract. Signature checking remains enabled throughout; `--no-check-signature` would make the end-to-end run easier by removing one of the road segments it exists to prove.
+The OpenPGP lane uses OpenPGP-signed configuration and code tips and remains green. Signature checking remains enabled throughout; `--no-check-signature` would make the end-to-end run easier by removing one of the road segments it exists to prove.
 
 The negative OpenPGP lane proves that a wrong or absent signature stops before dispatch and that rerun is sufficient once a trusted tip is restored. Barnyard currently checks only the selected tip with `git log -n 1 --format=%G?`, so the rig describes this evidence as tip verification rather than full-history verification.
 
-The SSH-signing lane is initially an expected failure. A correctly SSH-signed tip cannot verify while `gpg.ssh.allowedSignersFile` is `/dev/null`, and bootstrap has no way to install an allowed-signers policy. Once Barnyard gains a distinct allowed-signers property and installs a file such as `/etc/barnyard/allowed_signers`, the trusted SSH case becomes a required success and a wrong-key or wrong-principal case remains a required failure. The signing key remains separate from repository access keys in both forms of the test.
+The SSH-signing lane is also required to succeed. Bootstrap installs `/etc/barnyard/allowed_signers`, a correctly SSH-signed tip verifies against it, and a wrong key or wrong principal must fail. The signing key remains separate from repository access keys in both forms of the test.
 
 ## What the smoke proves
 
@@ -112,7 +112,7 @@ It does not prove performance, resource ceilings, network partitions, repository
 
 **The payload carries material, not claims about the machine.** Bootstrap once derived an expected hostname from the text after `@` in the SSH destination and sent it for the agent to check. The OrbStack destination `barnyard@orb` implies `orb` while `/etc/hostname` says `barnyard`, so the rig would have failed a correct machine. The expectation block is gone rather than made explicit: a machine's hostname comes from Terraform and its distribution from `/etc/os-release`, the control side has no independent source for either, and reaching the intended machine is settled by the pinned host key on the SSH connection. The rig therefore needs no expected-hostname input, and the OrbStack destination may differ from the machine name without arrangement.
 
-**The SSH-signing lane must currently fail.** The runner points Git's SSH allowed-signers file at `/dev/null`, and bootstrap has no allowed-signers property. OpenPGP signing provides the initial green route. SSH signing remains a named diagnostic until Barnyard can provision and select explicit SSH commit trust.
+**SSH signing trust is explicit.** Bootstrap carries an allowed-signers file as material, installs it at `/etc/barnyard/allowed_signers`, and apply points Git at that file. The rig supplies a synthetic principal and key rather than borrowing the operator's ambient Git configuration.
 
 **Both selected refs require signatures.** Apply verifies the configuration ref and then the code ref named by that configuration. The repository builder signs both tips and tests failures without describing one signed ref as a signed deployment.
 

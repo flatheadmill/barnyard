@@ -458,7 +458,7 @@ function :barnyard:apply:body {
 
         [[ -v o_ref ]] && o_barnyard[branch]=$o_ref
 
-        git config --global gpg.ssh.allowedSignersFile /dev/null
+        git config --global gpg.ssh.allowedSignersFile /etc/barnyard/allowed_signers
         export GNUPGHOME=/etc/barnyard/gnupg
         export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
         if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
@@ -826,9 +826,6 @@ function :barnyard:gpg:trust {
         caught
     } > >(indent)
 }
-
-# TODO Making peace with GPG after having decided it was a relic from the 90's.
-# But, didn't we also add the ability to trust SSH signing? If not, we should.
 
 # TODO And furthermore, that signing... that was stretch, wasn't it?
 
@@ -1219,6 +1216,7 @@ function :help:control:bootstrap {
         # desc -- configure a prepared Barnyard agent
         Configure a prepared Barnyard agent from one JSON payload.
         # opt branch -- < branch >
+        # opt allowed-signers -- < allowed signers file >
         # opt destination -- < ssh destination >
         # opt fingerprint -- < gpg fingerprint >
         # opt gpg -- < public key file >
@@ -1246,14 +1244,16 @@ function :help:control:bootstrap {
 }
 
 function :args:control:bootstrap {
-    eval "$(args d,destination k,known s,ssh -a g,gpg -a f,fingerprint \
+    eval "$(args d,destination A,allowed-signers k,known s,ssh -a g,gpg -a f,fingerprint \
         -s r,repository -s b,branch -bx h,help -- "$@")"
 }
 
 function :execute:control:bootstrap {
     [[ -v o_destination ]] || abend 'an SSH destination is required'
-    (( ${+o_known} || ${+o_ssh} || ${#o_gpg} || ${#o_fingerprint} ||
+    (( ${+o_allowed_signers} || ${+o_known} || ${+o_ssh} || ${#o_gpg} || ${#o_fingerprint} ||
         ${+o_repository} || ${+o_branch} )) || abend 'nothing to bootstrap'
+    [[ ! -v o_allowed_signers || -r $o_allowed_signers ]] ||
+        abend 'allowed signers file is not readable: %s' "$o_allowed_signers"
     [[ ! -v o_known || -r $o_known ]] || abend 'known_hosts file is not readable: %s' "$o_known"
     [[ ! -v o_ssh || -r $o_ssh ]] || abend 'SSH private key file is not readable: %s' "$o_ssh"
     if [[ -v o_repository || -v o_branch ]]; then
@@ -1275,6 +1275,7 @@ function :execute:control:bootstrap {
     typeset -a properties=(
         -s "version=$BARNYARD_VERSION"
     )
+    [[ -v o_allowed_signers ]] && properties+=( "ssh.allowed_signers=@$o_allowed_signers" )
     [[ -v o_known ]] && properties+=( "ssh.known_hosts=@$o_known" )
     [[ -v o_ssh ]] && properties+=( "ssh.private_key=@$o_ssh" )
     if [[ -v o_repository ]]; then
@@ -1464,7 +1465,9 @@ function :barnyard:agent:bootstrap {
         (.version | type == "string" and length > 0) and
         ((has("ssh") | not) or
             (.ssh | type == "object" and length > 0 and
-                keys_are([ "known_hosts", "private_key" ]) and
+                keys_are([ "allowed_signers", "known_hosts", "private_key" ]) and
+                ((has("allowed_signers") | not) or
+                    (.allowed_signers | type == "string" and length > 0)) and
                 ((has("known_hosts") | not) or
                     (.known_hosts | type == "string" and length > 0)) and
                 ((has("private_key") | not) or
@@ -1543,6 +1546,13 @@ function :barnyard:agent:bootstrap {
     fi
 
     typeset o_file=- o_fingerprint o_repository
+    if printf '%s' "$payload" |
+        jq -e 'has("ssh") and (.ssh | has("allowed_signers"))' > /dev/null
+    then
+        printf '%s' "$payload" | jq -jr '.ssh.allowed_signers' |
+            exemplar :barnyard:ssh:allowed-signers ||
+                abend 'unable to install SSH allowed signers'
+    fi
     if printf '%s' "$payload" |
         jq -e 'has("ssh") and (.ssh | has("known_hosts"))' > /dev/null
     then
@@ -1743,6 +1753,24 @@ function :barnyard:ssh:known-hosts {
         fi
         (){ printf '%s\n' $known_hosts > /etc/barnyard/known_hosts }
         (){ cat /etc/barnyard/known_hosts }
+    } always {
+        caught
+    } > >(indent)
+}
+
+function :barnyard:ssh:allowed-signers {
+    typeset allowed_signers
+    block 'set SSH allowed signers'
+    {
+        (){ (( $EUID == 0 )) }
+        if [[ $o_file = - ]]; then
+            show eval 'allowed_signers=$(cat)'
+        else
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; allowed_signers=$(<%q) }
+        fi
+        (){ printf '%s\n' $allowed_signers > /etc/barnyard/allowed_signers }
+        (){ cat /etc/barnyard/allowed_signers }
     } always {
         caught
     } > >(indent)

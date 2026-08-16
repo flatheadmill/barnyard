@@ -8,6 +8,7 @@ typeset fixture=$here/fixtures/github-public.asc
 whence jo > /dev/null || { print -u 2 'fatal: jo is required'; exit 1 }
 whence jq > /dev/null || { print -u 2 'fatal: jq is required'; exit 1 }
 whence gpg > /dev/null || { print -u 2 'fatal: gpg is required'; exit 1 }
+whence ssh-keygen > /dev/null || { print -u 2 'fatal: ssh-keygen is required'; exit 1 }
 whence zshctl > /dev/null || { print -u 2 'fatal: zshctl is required'; exit 1 }
 
 typeset barnyard_version=$($barnyard version)
@@ -71,6 +72,10 @@ function probe_receiver {
                 cat > /dev/null
                 print APPLY_known-hosts
             }
+            function :barnyard:ssh:allowed-signers {
+                cat > /dev/null
+                print APPLY_allowed-signers
+            }
             function :barnyard:ssh:private-key {
                 cat > /dev/null
                 print APPLY_private-key
@@ -112,7 +117,8 @@ function run_real_receiver {
             typeset name body
             typeset root_check='"'"'(( $EUID == 0 ))'"'"'
             typeset etc_path=/etc/barnyard var_path=/var/lib/barnyard
-            for name in :barnyard:ssh:known-hosts :barnyard:ssh:private-key \
+            for name in :barnyard:ssh:allowed-signers :barnyard:ssh:known-hosts \
+                :barnyard:ssh:private-key \
                 :barnyard:gpg:import :barnyard:gpg:trust :barnyard:clone
             do
                 body=$functions[$name]
@@ -177,12 +183,16 @@ EOF
     chmod 755 $tmp/bin/gpg
 
     typeset known=$tmp/github-known-hosts private_key=$tmp/id_barnyard
+    typeset allowed_signers=$tmp/allowed_signers signing_key=$tmp/signing-key
     print -r -- 'github.com ssh-ed25519 TEST' > $known
     print -r -- 'PRIVATE KEY CONTENT MUST NOT REACH ARGV' > $private_key
+    ssh-keygen -q -t ed25519 -N '' -f $signing_key
+    print -r -- "test@example.invalid $(<$signing_key.pub)" > $allowed_signers
 
     BARNYARD_CAPTURE=$tmp/capture BARNYARD_REAL_JO=$real_jo PATH=$tmp/bin:$PATH \
         $barnyard control bootstrap \
             --destination operator@bench.invalid \
+            --allowed-signers $allowed_signers \
             --known $known \
             --ssh $private_key \
             --gpg $fixture --gpg $fixture \
@@ -192,11 +202,15 @@ EOF
             --branch production
 
     typeset payload=$(<$tmp/capture/stdin)
-    jq -e --arg known "$(<$known)" --arg key "$(<$private_key)" \
+    jq -e --arg allowed "$(<$allowed_signers)" --arg known "$(<$known)" --arg key "$(<$private_key)" \
         --arg gpg "$(<$fixture)" '
         . == {
             "version": "0.26.0",
-            "ssh": { "known_hosts": $known, "private_key": $key },
+            "ssh": {
+                "allowed_signers": $allowed,
+                "known_hosts": $known,
+                "private_key": $key
+            },
             "gpg": {
                 "import": [ $gpg, $gpg ],
                 "trust": [
@@ -216,6 +230,8 @@ EOF
     assert_not 'private key is absent from SSH argv' "$(<$tmp/capture/ssh-argv)" '*PRIVATE KEY CONTENT*'
     assert_not 'private key is absent from jo argv' "$(<$tmp/capture/jo-argv)" '*PRIVATE KEY CONTENT*'
     assert 'jo receives the private-key path' "$(<$tmp/capture/jo-argv)" "*ssh.private_key=@$private_key*"
+    assert 'jo receives the allowed-signers path' "$(<$tmp/capture/jo-argv)" \
+        "*ssh.allowed_signers=@$allowed_signers*"
 
     rm -f $tmp/capture/calls $tmp/capture/stdin
     BARNYARD_CAPTURE=$tmp/capture BARNYARD_REAL_JO=$real_jo PATH=$tmp/bin:$PATH \
@@ -280,7 +296,7 @@ EOF
     typeset out=$(probe_receiver "$payload")
     assert 'receiver accepts the complete payload' "$out" '*RECEIVER_STATUS=0*'
     assert 'receiver applies in order' "$out" \
-        '*APPLY_known-hosts*APPLY_private-key*APPLY_gpg-import*APPLY_gpg-import*APPLY_gpg-trust:5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23*APPLY_gpg-trust:968479A1AFF927E37D1A566BB5690EEEBB952194*APPLY_clone:git@github.com:example/barnyard-configuration.git#production*'
+        '*APPLY_allowed-signers*APPLY_known-hosts*APPLY_private-key*APPLY_gpg-import*APPLY_gpg-import*APPLY_gpg-trust:5DE3E0509C47EA3CF04A42D34AEE18F83AFDEB23*APPLY_gpg-trust:968479A1AFF927E37D1A566BB5690EEEBB952194*APPLY_clone:git@github.com:example/barnyard-configuration.git#production*'
     assert 'receiver applies both GPG imports' "$(line_count "$out" APPLY_gpg-import)" 2
     assert 'receiver logs bootstrap completion' "$out" '*status=success*operation=bootstrap*'
 
@@ -313,6 +329,11 @@ EOF
     out=$(probe_receiver "$invalid")
     assert_not 'empty private key is rejected' "$out" '*RECEIVER_STATUS=0*'
     assert_not 'empty private key rejects before dispatch' "$out" '*APPLY_*'
+
+    invalid=$(printf '%s' "$payload" | jq '.ssh.allowed_signers = ""')
+    out=$(probe_receiver "$invalid")
+    assert_not 'empty allowed signers is rejected' "$out" '*RECEIVER_STATUS=0*'
+    assert_not 'empty allowed signers rejects before dispatch' "$out" '*APPLY_*'
 
     out=$(probe_receiver '{"version":')
     assert_not 'malformed JSON is rejected' "$out" '*RECEIVER_STATUS=0*'
@@ -361,6 +382,7 @@ EOF
     BARNYARD_CAPTURE=$tmp/capture BARNYARD_REAL_JO=$real_jo PATH=$tmp/bin:$PATH \
         $barnyard control bootstrap \
             --destination operator@bench.invalid \
+            --allowed-signers $allowed_signers \
             --known $known \
             --ssh $private_key \
             --gpg $fixture --gpg $fixture \
@@ -373,6 +395,8 @@ EOF
     assert 'real appliers complete through exemplar' "$out" '*RECEIVER_STATUS=0*'
     assert_not 'real appliers do not execute literal placeholders' "$out" '*%q*'
     assert_not 'real appliers retain transcript context' "$out" '*no job control*'
+    assert 'allowed signers is installed' \
+        "$(<$tmp/root/etc/barnyard/allowed_signers)" "$(<$allowed_signers)"
     assert 'known_hosts is installed' "$(<$tmp/root/etc/barnyard/known_hosts)" "$(<$known)"
     assert 'private key is installed' "$(<$tmp/root/etc/barnyard/id_barnyard)" "$(<$private_key)"
     assert 'two real GPG imports run' "${$(wc -l < $tmp/gpg-imports)// /}" 2
@@ -384,6 +408,15 @@ EOF
     assert 'clone installs a bare mirror' \
         "$(git -C $tmp/root/var/lib/barnyard/repository rev-parse --is-bare-repository)" true
     assert 'clone installs the branch file' "$(<$tmp/root/etc/barnyard/branch)" main
+
+    git init -q -b main $tmp/signed
+    git -C $tmp/signed -c user.name=Barnyard -c user.email=test@example.invalid \
+        -c gpg.format=ssh -c user.signingkey=$signing_key -c commit.gpgsign=true \
+        commit --allow-empty -qm signed
+    assert 'installed allowed signers verifies an SSH-signed tip' \
+        "$(git -C $tmp/signed \
+            -c gpg.ssh.allowedSignersFile=$tmp/root/etc/barnyard/allowed_signers \
+            log -n 1 '--format=%G?')" G
 
     typeset previous_head=$(git -C $tmp/root/var/lib/barnyard/repository rev-parse HEAD)
     invalid=$(printf '%s' "$real_payload" |
