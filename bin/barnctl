@@ -1,246 +1,10 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env zshctl
 
-VERSION=0.24.2
+VERSION=0.25.0
 
-SCRIPT_DIR=${${0:a}%/*}
+SCRIPT_DIR=${${zshctl[argzero]:A}%/*}
 
 function ___ {
-}
-
-function zsh_parse_arguments {
-    typeset error=${${1:-}:q} context=${${2:-}:q}
-    shift 2
-
-    # TODO -hfoo will become $o_help and then set -- foo
-    typeset -A arguments declared localized arg
-    typeset regex short long remainder
-
-    while :
-    do
-        case "$1" in
-            # Indicates send of parser arguments.
-            -- )
-                shift
-                break
-                ;;
-            # Parse program arguments.
-            * )
-                # Check for a variable name or else we'll generate an `o_` prefixed one.
-                if [[ "$1" =~ ^([^,]+)=(.*)$ ]]; then
-                    arg[variable]="$match[1]"
-                    pattern="$match[2]"
-                else
-                    arg[variable]=
-                    pattern="$1"
-                fi
-
-                shift
-
-                regex='^([a-zA-Z0-9]{0,2}),([^%@:#!]*)([%@:#!]?)(.*)$'
-                [[ "$pattern" =~ $regex ]] || { printf '%s definition %q' $error "$1"; return; }
-                short=${match[1]} long=${match[2]} arg[kind]=${match[3]} arg[remainder]="${match[4]}"
-
-                [[ -z "$arg[variable]" ]] && {
-                    [[ -z "$long" ]] && arg[variable]=o_$short || arg[variable]=o_${long:gs/-/_/}
-                }
-
-                case "x$arg[kind]" in
-                    x@ )
-                        arg[type_flag]=' -a'
-                        arg[type_name]='array-local'
-                        ;;
-                    x% )
-                        arg[type_flag]=' -A'
-                        arg[type_name]='association-local'
-                        [[ -z "$arg[remainder]" ]] && arg[remainder]==
-                        ;;
-                    * )
-                        arg[type_flag]=' '
-                        arg[type_name]='scalar-local'
-                        ;;
-                esac
-
-                [[ -n "$long" ]] && arguments[--${long}]="${(@qq)${(@kv)arg}}"
-                [[ -n "$short" ]] && arguments[-${short}]="${(@qq)${(@kv)arg}}"
-
-                [[ "declared[$arg[variable]]" = 1 ]] && continue
-                case x"$arg[kind]" in
-                    x | x\! | x\# )
-                        printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != "scalar-local" ]] } && local %s\n' \
-                            "$arg[variable]" "$arg[variable]" "$arg[variable]"
-                        case "x$arg[kind]" in
-                            x | x\# )
-                                printf '%s=0\n' "$arg[variable]"
-                                ;;
-                            * )
-                                printf '%s=1\n' "$arg[variable]"
-                                ;;
-                        esac
-                        ;;
-                esac
-                declared[$arg[variable]]=1
-                ;;
-        esac
-    done
-
-    typeset -a args=( "$@" ) split
-    typeset i=1 arged flag negated delimiter
-    while (( i <= ${#args[@]} )); do
-        negated=0
-        case "${args[$i]}" in
-            - )
-                break
-                ;;
-            -- )
-                let i=i+1
-                break
-                ;;
-            --no-* )
-                regex='^--no-([a-zA-Z0-9][-a-zA-Z0-9]*)$'
-                if [[ "${args[$i]}" =~ $regex ]] && [[ -n "${arguments[--$match[1]]}" ]]; then
-                    arg=( "${(@Q)${(@z)${arguments[--$match[1]]}}}" )
-                    if [[ $arg[kind] == '!' ]]; then
-                        args[$i]="--${match[1]}"
-                        negated=1
-                    fi
-                fi
-                ;&
-            --* )
-                arged=0
-                regex='^(--[-a-zA-Z0-9]+)(=.*)?$'
-                [[ "${args[$i]}" =~ $regex ]] || { printf '%s unknown %s %q\n' $error $context "$1"; return; }
-                long="${match[1]}"
-                if [[ "$match[2]" != '' ]]; then
-                    arged=1
-                    args[i]=${match[2]:1}
-                else
-                    ((i++))
-                fi
-                flag=$long
-                [[ -z "${arguments[$long]}" ]] && { printf '%s unknown %s %q\n' $error $context "$long"; return; }
-                arg=( "${(@Q)${(@z)${arguments[$long]}}}" )
-                ;;
-            -* )
-                arged=0
-                # NB Oh, it's one or for an array, but for strings we start from zero. I see.
-                flag=${args[$i]:0:2}
-                [[ -z "${arguments[$flag]}" ]] && { printf '%s unknown %s %q\n' $error $context "$flag"; return; }
-                arg=( "${(@Q)${(@z)${arguments[$flag]}}}" )
-                case "x$arg[kind]" in
-                    x: | x@ )
-                        if [[ ${#args[$i]} -eq 2 ]]; then
-                            let i=i+1
-                        else
-                            args[i]=${args[$i]:2}
-                        fi
-                        ;;
-                    * )
-                        # TODO If you have args a b and c and you get -abd what
-                        # does getopt do? Seems to just append...
-                        if [[ ${#args[i]} -gt 2 ]]; then
-                            args[i]="-${args[i]:2}"
-                        else
-                            ((i++))
-                        fi
-                        [[ "$arg[kind]" = '!' ]] && negated=1
-                        ;;
-                esac
-                ;;
-            *)
-                break
-                ;;
-        esac
-        case "x$arg[kind]" in
-            x | x\# | x\! )
-                (( $arged )) && { printf '%s no_args %s %q\n' $error $context "$flag"; return; }
-                ;;
-        esac
-        case "x$arg[kind]" in
-            x )
-                printf 'local %s=1\n' "$arg[variable]"
-                ;;
-            x\# )
-                printf '((%s++))\n' "$arg[variable]"
-                ;;
-            x\! )
-                if (( $negated )); then
-                    printf '%s=0\n' "$arg[variable]"
-                else
-                    printf '%s=1\n' "$arg[variable]"
-                fi
-                ;;
-            * )
-                (( i <= ${#args[@]} )) || { printf '%s arg_missing %s %q\n' $error $context "$flag"; return; }
-                if [[ "$localized[$arg[variable]]" != 1 ]]; then
-                    printf '{ [[ ! -v %s ]] || [[ "${(t)%s}" != %s ]] } && typeset%s %s\n' \
-                        "$arg[variable]" "$arg[variable]" \
-                        "$arg[type_name]" "$arg[type_flag]" "$arg[variable]"
-                fi
-                case "x$arg[kind]" in
-                    x: )
-                        printf '%s=%s\n' "$arg[variable]" "${args[$i]:q}"
-                        ((i++))
-                        ;;
-                    * )
-                        [[ "$localized[$arg[variable]]" != 1 ]] && printf '%s=()\n' "$arg[variable]"
-                        case "x$arg[kind]" in
-                            x@ )
-                                printf '%s+=(%s)\n' "$arg[variable]" "${args[$i]:q}"
-                                ((i++))
-                                ;;
-                            x% )
-                                delimiter=$arg[remainder]
-                                split=("${(@ps:$delimiter:)args[2]}")
-                                if (( ${#split[@]} == 1 )); then
-                                    (( i + 1 <= ${#args[@]} )) || {
-                                        print -R "$error $context arg_missing ${flag:q}"; return;
-                                    }
-                                    printf '%s+=(%s %s)\n' "$arg[variable]" "${args[$i]:q}" "${args[$i+1]:q}"
-                                    ((i+=2))
-                                else
-                                    printf '%s+=(%s %s)\n' "$arg[variable]" \
-                                        "${split[1]:q}" "${(pj:$delimiter:)${(@)split[2,-1]}}"
-                                    ((i++))
-                                fi
-                                ;;
-                        esac
-                        ;;
-                esac
-                localized[$arg[variable]]=1
-                ;;
-            * )
-        esac
-    done
-
-    (( i ==  ${#args[@]} + 1 )) && printf 'set --\n' || printf 'set -- %s\n' "${(j: :)${(@qq)${(@)args[$i,-1]}}}"
-}
-
-function acrectl_parse_arguments_error {
-    print -R -u 2 -- "$@"
-    exit 1
-}
-
-function barnctl_parse_arguments {
-    zsh_parse_arguments barnctl_argument_error "$@"
-    echo "(( \$o_help )) && usage_$1"
-}
-
-IFS=$'\n' read -d '' -r -A BARNCTL_COMMANDS < <( \
-    sed -n 's/^function barnctl_command_\(.*\) {$/\1/p' "$SCRIPT_DIR/barnctl" \
-)
-
-function barnctl_next_command {
-    typeset prefix=$1 command=$2
-    shift 2
-    for func in "${BARNCTL_COMMANDS[@]}"; do
-        if [[ "$func" == "$prefix$command" ]]; then
-            "barnctl_command_$func" "$@"
-            return
-        fi
-    done
-    abend <<'    EOF'
-        error: no such command \`barnctl ${prefix:gs/_/ }$command\`
-    EOF
 }
 
 ___ barnctl_common ___
@@ -446,52 +210,45 @@ function barnctl_command_apply {
 # server-side `barnyard` executable has commands to simplify  the construction
 # of the scripts here.
 
-function barnctl_command_bootstrap {
-    typeset -a o_gpg o_fingerprint
-    eval "$(barnctl_parse_arguments bootstrap h,help g,gpg@ f,fingerprint@ k,known: s,ssh: c,clone: -- "$@")"
+function :args:bootstrap {
+    eval "$(args u,uri k,known s,ssh c,clone -a g,gpg -a f,fingerprint h,help -- "$@")"
+}
 
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
-
-    typeset server=${1:-} slurp gpg fingerprint
-
+function :execute:bootstrap {
+    [[ -v o_uri || -n $o_uri ]] || abend 'fatal: ssh hostname is required'
+    typeset slurp gpg fingerprint
     # We get into trouble when a file does not end with a new line and we try to
     # make a HEREDOC from it. The `EOF` of the HEREDOC will not appear on a new
     # line. So, we read our files into a varaible using `$(cat)` so that the
     # process substituion will strip all new lines. We know there are none so we
     # can add just one.
-
     {
         print 'set -e'
         if [[ -v o_known ]]; then
-            slurp=$(cat "$o_known")
-            printf 'cat <<EOF | barnyard ssh known-hosts --version=%q - || exit 1\n' $VERSION
+            slurp=$(<"$o_known")
+            printf 'cat <<EOF | barnyard ssh known-hosts --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         fi
         if [[ -v o_ssh ]]; then
-            slurp=$(cat "$o_ssh")
-            printf 'cat <<EOF | barnyard ssh private-key --version=%q - || exit 1\n' $VERSION
+            slurp=$(<"$o_ssh")
+            printf 'cat <<EOF | barnyard ssh private-key --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         fi
         for gpg in "${(@)o_gpg}"; do
-            slurp=$(cat "$gpg")
-            printf 'cat <<EOF | barnyard gpg import --version=%q - || exit 1\n' $VERSION
+            slurp=$(<"$gpg")
+            printf 'cat <<EOF | barnyard gpg import --version=%q --file - || exit 1\n' $VERSION
             printf '%s\n' "$slurp"
             print EOF
         done
         for fingerprint in "${(@)o_fingerprint}"; do
-            printf 'barnyard gpg trust --version=%q %q || exit 1\n' $VERSION "$fingerprint"
+            printf 'barnyard gpg trust --version=%q --fingerprint %q || exit 1\n' $VERSION "$fingerprint"
         done
         if [[ -v o_clone ]]; then
-            printf 'barnyard clone --version=%q %q || exit 1\n' $VERSION "$o_clone"
+            printf 'barnyard clone --version=%q --repository %q || exit 1\n' $VERSION "$o_clone"
         fi
-        if (( ${#o_gpg} || ${#o_fingerprint} )); then
-            printf 'GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys\n'
-        fi
-    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" '/usr/bin/sudo /bin/bash'
 }
 
 function assert_barnyard_directory {
@@ -500,125 +257,122 @@ function assert_barnyard_directory {
     EOF
 }
 
-function barnctl_command_commit {
-    eval "$(barnctl_parse_arguments commit "h,help" -- "$@")"
-
-    assert_barnyard_directory
-
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
-
-    typeset server=${1:-}
-
-    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" "/usr/local/bin/barnyard commit --version $VERSION"
+function :args:commit {
+    eval "$(args u,uri -b h,help -- "$@")"
 }
 
-function configure_or_unconfigure {
-    typeset operation=${1:-} hostname=${2:-}
-    shift 2
-
+function :execute:commit {
     assert_barnyard_directory
+    [[ -v o_uri ]] || abend 'an ssh URI or destination is required'
+    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$o_uri" "/usr/local/bin/barnyard commit --version $VERSION"
+}
 
-    [[ -d "machines/$hostname" ]] || abend<<'    EOF'
-        error: hostname configuration not found
-    EOF
-    typeset -a modules
-    if (( ! $# )); then
-        for module in machines/$hostname/*; do
-            modules+=(${module##*/})
-        done
-    else
-        modules=("$@")
-    fi
+function :args:configure {
+    typeset o_include='*' machine module
+    eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
+}
+
+function :execute:configure {
     typeset -A o_module
-    for module in "${modules[@]}"; do
-        o_module=()
-        barnctl_read_config o_module machines/$hostname/$module
-        if [[ -z "$o_module[_module]" ]]; then
-            o_module[_module]=$module
-        fi
-        if [[ -e ../code/modules/$o_module[_module]/$operation.zsh ]]; then
-            zsh <(barnctl_shell_resource barnctl_configure) \
-                $SCRIPT_DIR $PWD $hostname $o_module[_module] $module $operation || abend<<'            EOF'
-                $operation module \`$module\` failed
-            EOF
-        fi
+    for machine in age/*(N); do
+        machine=${machine:t}
+        [[ $machine = $~o_include ]] || continue
+        [[ $machine = $~o_exclude ]] && continue
+        for module in machines/$machine/*; do
+            barnctl_read_config o_module $module
+            if [[ -z $o_module[_module] ]]; then
+                o_module[_module]=${module:t}
+            fi
+            if [[ -e ../code/modules/$o_module[_module]/configure.zsh ]]; then
+                print $module
+                =barnctl internal configure \
+                    --barnyard module=${module:t} \
+                    --barnyard hostname=${machine:t}
+            fi
+        done
     done
 }
 
-function barnctl_command_configure {
-    eval "$(barnctl_parse_arguments apply "h,help" -- "$@")"
-    configure_or_unconfigure configure "$@"
+function :execute:internal {
+    delegate "$@"
 }
 
-function barnctl_command_unconfigure {
-    eval "$(barnctl_parse_arguments unconfigure "h,help" -- "$@")"
-    configure_or_unconfigure unconfigure "$@"
+function :args:internal:configure {
+    eval "$(args -A ,barnyard -bx h,help -- "$@")"
 }
 
-function barnctl_command_generate {
+function :execute:internal:configure {
+    typeset -A o_module
+    barnctl_read_config o_module machines/$o_barnyard[hostname]/$o_barnyard[module]
+    o_barnyard[barnyard]=$PWD
+    o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
+    o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
+    source "${o_barnyard[barnyard]}/../code/modules/${o_module[_module]:-$o_barnyard[module]}/configure.zsh"
+}
+
+function :args:generate {
     typeset o_include='*'
-    eval "$(barnctl_parse_arguments generate "h,help" "i,include:" "e,exclude:" -- "$@")"
+    eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
+}
 
+function :execute:generate {
     typeset configuration generate now=$(date +%s)
-
     generate="$({
         barnctl_shell_resource barnctl_common
-        print ''
+        print
         barnctl_shell_resource barnctl_generate
     })"
-
     for configuration in "$@"; do
         [[ ${configuration#*.} != zsh ]] && continue
         zsh -c "$generate" -- "$o_include" "$o_exclude" "$configuration" || exit 1
     done
 }
 
-function barnctl_command_inventory {
+function :args:inventory {
     typeset o_include='*'
-    eval "$(barnctl_parse_arguments inventory "h,help" "i,include:" "e,exclude:" -- "$@")"
+    eval "$(args -@ -d i,include e,exclude -b h,help -- "$@")"
+}
 
+function :execute:inventory {
     typeset inventory configuration
-
     inventory="$({
         barnctl_shell_resource barnctl_common
         print ''
         barnctl_shell_resource barnctl_inventory
     })"
-
     for configuration in "$@"; do
-        [[ ${configuration#*.} != zsh ]] && continue
+        [[ ${configuration##*.} != zsh ]] && continue
         zsh -c "$inventory" -- "$o_include" "$o_exclude" "$configuration" || exit 1
     done
 }
 
-function barnctl_command_prepare {
-    eval "$(barnctl_parse_arguments prepare "h,help" -- "$@")"
-
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
+function barnctl_barnyard_source {
+    typeset barnyard=$(sed 's/BARNYARD_VERSION=.*/BARNYARD_VERSION='$VERSION'/' < $BARNCTL_DIR/barnyard)
+    heredoc -f $barnyard <<'    EOF'
+        set -e
+        BARNYARD_SOURCE=$(cat <<'EOS'
+        %s
+        EOS
+        )
     EOF
+}
 
-    typeset server=${1:-}
+function :args:prepare {
+    eval "$(args u,uri -b h,help -- "$@")"
+}
 
+function :execute:prepare {
+    [[ -v o_uri || -n $o_uri ]] || abend 'fatal: an ssh destination or URI is required'
     {
-        print -R 'set -e'
-        print -R 'BARNYARD_SOURCE=$(cat <<'"'"EOS"'"
-        sed 's/VERSION=.*/VERSION='$VERSION'/' "${SCRIPT_DIR}/barnyard"
-        print -R 'EOS'
-        print -R ')'
-        print -R ''
+        barnctl_barnyard_source
         barnctl_shell_resource barnctl_prepare
-    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 $o_uri '/usr/bin/sudo /bin/bash'
 }
 
 function barnctl_command_upgrade {
-    eval "$(barnctl_parse_arguments upgrade "h,help" -- "$@")"
+    eval "$(args h,hostname -b h,help -- "$@")"
 
-    (( $# )) || abend<<'    EOF'
-        erorr: ssh hostname is required
-    EOF
+    [[ -v o_hostname ]] || abend 'fatal: ssh hostname is required'
 
     typeset server=${1:-}
 
@@ -635,41 +389,55 @@ function barnctl_command_upgrade {
     } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 "$server" '/usr/bin/sudo /bin/bash'
 }
 
-function barnctl_command_version {
-    eval "$(barnctl_parse_arguments version "h,help" -- "$@")"
-    print -R "$VERSION"
+function :args:version {
+    eval "$(args -b h,help -- "$@")"
 }
 
+function :execute:version {
+    print $VERSION
+}
 
-function {
-    eval "$(barnctl_parse_arguments root "h,help" -- "$@")"
-    barnctl_next_command "" "$@"
-} "$@"
+function :args {
+    typeset BARNCTL_DIR=${zshctl[argzero]:A:h}
+    eval "$(args -UC -bx h,help -- "$@")"
+}
 
-exit
+function :execute {
+    delegate "$@"
+}
+
+return
 
 # Any keys specific to the machine permanent and are never updated. If a key
 # specific to the machine is compromised, it means the machine is compromised,
 # because the key never leaves the machine.
 
 ___ barnctl_prepare ___
-barnyard_divider() {
-    typeset label=${1:-}
-    typeset bar=--------------------------------------------------------------------------------
-    shift
-    typeset prefix="------- $label "
-    echo "$bar"
-    echo "$prefix ${bar:0:$(( ${#bar} - ${#prefix} - 1 ))}"
-    echo "$bar"
-}
-barnyard_divider 'apt update'
-apt-get update
-barnyard_divider 'install zsh, gnupg2, git'
-apt-get install -y zsh gnupg2 git
-barnyard_divider 'install barnyard'
-echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
-chmod 755 /usr/local/bin/barnyard
-barnyard version
+echo bootstrap
+echo
+{
+    echo '$ apt-get update && apt-get install -y zsh gnupg2 git age rsync'
+    apt-get update && apt-get install -y zsh gnupg2 git age rsync
+    echo '$ mkdir -p /var/lib/barnyard'
+    mkdir -p /var/lib/barnyard
+    echo '$ rm -rf /var/lib/barnyard/zshctl'
+    rm -rf /var/lib/barnyard/zshctl
+    echo '$ git -C /var/lib/barnyard clone --branch topic/main/redux https://github.com/flatheadmill/barnyard.git'
+    git -C /var/lib/barnyard clone --branch topic/main/redux https://github.com/flatheadmill/zshctl.git
+    echo '$ rsync -av /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/'
+    rsync -av /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/
+    echo '$ install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/'
+    install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/
+    echo '$ zshctl version'
+    zshctl version
+    echo '$ echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard'
+    echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
+    echo '$ chmod 755 /usr/local/bin/barnyard'
+    chmod 755 /usr/local/bin/barnyard
+    echo '$ barnyard version'
+    barnyard version
+} 2>&1 | sed -u 's/^/    /'
+echo
 barnyard prepare
 ___ barnctl_upgrade ___
 if [[ -e /usr/local/bin/barnyard ]]; then
@@ -702,21 +470,6 @@ if [[ "$version" != "$VERSION" ]]; then
     esac
     echo "version: $(barnyard version)"
 fi
-___ barnctl_configure ___
-source <(awk '/^___ barnctl_common ___/{flag=1;next}/^___/{flag=0}flag' "$1/barnctl")
-
-shift
-
-function {
-    typeset -A o_barnyard=( o_force '0' ) o_module o_registers
-    typeset module=${3:-}
-    o_barnyard[barnyard]=${1:-} o_barnyard[hostname]=${2:-} o_barnyard[module]=${4:-} o_barnyard[operation]=${5:-}
-    shift 3
-    o_barnyard[resources]="${o_barnyard[barnyard]}/resources/${o_barnyard[hostname]}"
-    o_barnyard[age]=$(<"${o_barnyard[barnyard]}/age/${o_barnyard[hostname]}")
-    barnctl_read_config o_module "${o_barnyard[barnyard]}/machines/${o_barnyard[hostname]}/${o_barnyard[module]}"
-    source "${o_barnyard[barnyard]}/../code/modules/$module/${o_barnyard[operation]}.zsh"
-} "$@"
 ___ barnctl_generate ___
 function __barnyard_read_config {
     [[ $(( $# % 2 )) == 0 ]] || abend bad_argument_count
@@ -858,9 +611,7 @@ function machine {
     typeset disabled=$@[(Ie)enabled=0]
     o_barnyard[hostname]="$hostname"
     if [[ $disabled -eq 0 && "$hostname" = $~o_barnyard[include] && ( -z $o_barnyard[exclude] || "$hostname" != $~o_barnyard[exclude] ) ]] ; then
-        printf '<machine>: '
-        printf ' %q' "$hostname"
-        printf '\n'
+        printf '<machine>: %q\n' $hostname
     fi
 }
 
@@ -873,3 +624,5 @@ function {
     source "$o_barnyard[configuration]"
 } "$@"
 ___
+
+# vim: ft=zsh :

@@ -1,0 +1,1850 @@
+#!/usr/bin/env zshctl
+
+zshctl[man_title]='Barnyard Manuals'
+
+# For the readme...
+#
+# * The declaration gives an operator its name; `_operator` selects its implementation.
+# * `o_barnyard[barnyard]` is the repository and `o_barnyard[archive]` is the
+# directory where we extracted the barnyard version.
+
+# TODO Get stdout and `journalctl` date formats identical. (Probably locale
+# based.)
+
+#
+
+# Now I want the ability to export the barnyard functions.
+#
+# This means `barnyard apply`, `barnyard funcs`, `barnyard whever`.
+#
+# But we don't want to get into serious argument parsing, do we?
+
+function ___ {
+}
+
+# TODO Cannot remember all that I wanted to do with property names, but it seems
+# like all I need are the directives and based64 encoding. Maybe include is
+# something like `@/modules/postgresql/common`.
+export BARNYARD_PATH=${${0:a}%/*}
+
+BARNYARD_VERSION=0.26.0
+BARNYARD_RELEASE_DATE='January 1, 1970'
+
+function :help {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Manage foundational machines outside the orchestrator.
+        # opt help
+        Display help for \`barnyard\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard\` is configuration management for the machines that live
+        outside Kubernetes: the foundational virtual machines and services the
+        orchestrator deliberately does not cover.
+
+        Barnyard is one executable. A prepared machine receives the single
+        \`barnyard\` file at \`/usr/local/bin/barnyard\`; there is no package to
+        unpack and no client/server version dance. The file you built is the
+        file the machine runs.
+
+        Barnyard reserves exactly five top-level words: \`control\`, \`agent\`,
+        \`version\`, \`extend\`, and \`completions\`. Every other Unicode word
+        belongs to the user's operators. If Barnyard needs more of its own
+        vocabulary, it nests that work under a word it already owns instead of
+        taking a sixth.
+
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following commands are available. Use \`--help\` on a command for
+        more detail.
+        > commands
+    EOF
+}
+
+function :args {
+    eval "$(args -UD -bx h,help -- "$@")"
+}
+
+function :help:version {
+    heredoc -v help -q <<'    EOF'
+        # desc -- display version
+        Display the current Barnyard version.
+        # opt help
+        Display help for \`barnyard version\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard version\` prints the Barnyard version number to standard out.
+        ## OPTIONS
+        > options
+    EOF
+}
+
+function :args:version {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:version {
+    print $BARNYARD_VERSION
+}
+
+# TODO The string resources go away. No longer necessary because of zshctl.
+# Operators will have all these functions sourced and inherited.
+___ barnyard_common ___
+typeset -A PRIORITY
+
+PRIORITY[panic]=0
+PRIORITY[alert]=1
+PRIORITY[crit]=2
+PRIORITY[err]=3
+PRIORITY[warn]=4
+PRIORITY[notice]=5
+PRIORITY[info]=6
+PRIORITY[debug]=7
+
+if [[ -z ${BARNYARD_LOG_LEVEL:-} ]]; then
+    BARNYARD_LOG_LEVEL=info
+elif (( ! ${+PRIORITY[$BARNYARD_LOG_LEVEL]} )); then
+    print -u 2 "fatal: invalid log level $BARNYARD_LOG_LEVEL"
+    exit 1
+fi
+
+# An environment variable so someone can set this in their shell.
+export BARNYARD_LOG_LEVEL
+
+
+# This is a keeper, I'll bet. I'll bet we can't do Wireguard lighthouse without
+# it, need to get the addresses across production and development (even though
+# we have no "development" providers.)
+function barnyard_extract {
+    setopt localoptions pipefail
+    typeset branch=${1:-} destination=${2:-} good
+    good=$(
+        git -C "${o_barnyard[repository]}" log -n 1 --format='%G?' $branch --
+    ) || abend 'git log unable to verify signature'
+    case $good-${o_check_signature:-1} in
+        G-1 | *-0 )
+            mkdir -p $destination
+            {
+                git -C "$o_barnyard[repository]" archive $branch | tar -C "$destination" -x
+            } || abend 'unable to extract %s' ${(qqq)branch}
+            ;;
+        * )
+            abend 'invalid signature'
+            ;;
+    esac
+}
+
+
+
+function :extensions {
+    typeset own=$command_path[1]
+    typeset -a extension
+    if [[ -n ${BARNYARD_EXTENSION:-} ]]; then
+        [[ -d $BARNYARD_EXTENSION &&
+            -r $BARNYARD_EXTENSION/barnyard.extension.zsh ]] ||
+            abend 'invalid operator extension %s' "$BARNYARD_EXTENSION"
+        extension=( "${BARNYARD_EXTENSION:A}" )
+    fi
+    command_path=( "$own" "${extension[@]}" )
+}
+
+typeset -gA o_barnyard
+
+function panic {
+    log priority=err "$@"
+    exit 1
+}
+
+# TODO Not sure about logging and I would like to reconsider it. I don't know
+# what sort of logging we should have. There is some fumbling here with the
+# system journal as well, but I can't say I really knew what I was doing there.
+
+# Appears as though the last time I visted this, I'd given up on the notion of
+# logging each line to systemd with an appropriate PRIORITY since we are going
+# to run under systemd and our standard out and standard err are going to go to
+# systemd-journal anyway, so we would end up having two forms of logging,
+# whatever is coming out of standard I/O and whatever we are explicitly logging
+# with the systemd-journal.
+
+# We see now that Loki has a parser for the logfmt logging format which is
+# probably our best bet for getting the logging level. We can set alerts on a
+# query winnowed on the purpose of a virtual machine to look for log entries
+# that match a particular systemd unit and then parse for the log level. Should
+# be performant since we'll use purpose and unit as indicies.
+
+# Difficult to determine how to do structure with logs and the degree to which
+# you should label logs with systemd-journal when everything is supposed to be
+# shipped off to a different index. At some point I was attempting to get the
+# most out of systemd-journal by creating unique message ids. That's got to come
+# in handy some day, right? The ability to track a message over time as its line
+# number changes, that's useful, right?
+
+# No. Doesn't seem to be the way things work. Really just want to see what's
+# happening in our log database with cursory pattern matching. Not trying to
+# construct a UML diagram of my Zsh scripts.
+
+# Arguments are an optional syslog priority, followed by optional key value
+# pairs followed by a printf statement.
+
+# log <level> <name=value> <format> <format-args>
+function log {
+    typeset priority level ordered=() order=( level )
+    typeset -A fields
+
+    # The first argument
+    if [[ -z "${PRIORITY[$1]:-}" ]]; then
+        priority=info
+    else
+        priority=$1
+        shift
+    fi
+
+    # Create a template message. We do want level, operator and message first
+    # since that would probably be easiest to read in console spew.
+    typeset message_index
+    if [[ -n ${BARNYARD_OPERATOR:-} ]]; then
+        fields=( level $priority operator "$BARNYARD_OPERATOR" )
+    else
+        fields=( level $priority )
+    fi
+
+    # Escape the values of the key value pair. This will stop at the first
+    # argument that does not have an equal sign. You can use `--` to address
+    # ambiguities.
+    typeset name value
+    while [[ ${1:-} =~ ([^=]+)=(.*) ]]; do
+        shift
+        name=${match[1]}
+        value=${match[2]}
+        value=${value//\\/\\\\}
+        value=${value//\"/\\\"}
+        if [[ "$value" =~ [\ \\] ]]; then
+            value="\"$value\""
+        fi
+        order+=( $name )
+        fields[$name]="$value"
+    done
+
+    # You can use `--` to indicate an end of key value pairs. This would allow
+    # for a log line that formats out to `msg=info` using `-- info` as well as
+    # allow for a message that has an equal sign in it.
+    if [[ ${1:-} == '--' ]]; then
+        shift
+    fi
+
+    # Check if the message is at our logging level.
+    if (( $PRIORITY[$priority] > $PRIORITY[$BARNYARD_LOG_LEVEL] )); then
+        return
+    fi
+
+    # Resist the urge to DRY here, it is an intentional loop unroll to repeat
+    # the escaping of the message instead of first creating an array of key
+    # value pairs including the message and then escape all the pairs.
+    if (( $# )); then
+        typeset format="$1" message
+        shift
+        printf -v message "$format" "$@"
+        message=${message//\\/\\\\}
+        message=${message//\"/\\\"}
+        if [[ "$message" =~ [\ \\] ]]; then
+            message="\"$message\""
+        fi
+        order+=( msg )
+        fields[msg]=$message
+    fi
+
+    for name in "${(@kv)order}"; do
+        (( ${+fields[$name]} )) || continue
+        ordered+=( "$name=$fields[$name]" )
+        unset "fields[$name]"
+    done
+
+    # When we see this environment variable, it indicates that we are running
+    # inside systemd and we do not have to add date context, but I can't
+    # remember if it is something we set, or if it something that systemd sets.
+    # If it was oures, it would probably be prefixed with `BARNYARD_`.
+    if [[ -v INVOCATION_ID ]]; then
+        printf '%s\n' "${(j: :)ordered}"
+    else
+        printf '%s barnyard[%s]: %s\n' "$(date --rfc-3339=s | sed 's/+.*//')" $priority "${(j: :)${(@)ordered:1}}"
+    fi
+}
+
+function :barnyard:run {
+    typeset -A barnyard
+    typeset declaration=${1:-}
+    typeset code extension implementation name marker mode operation state tape
+    typeset -a applied diffs command
+    integer record_applied
+
+    [[ $declaration =~ '^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*(/[a-z][a-z0-9_-]*)?$' ]] ||
+        abend 'invalid operator declaration %s' "$declaration"
+
+    barnyard=( "${(@kv)o_barnyard}" )
+    name=${declaration%%/*}
+    operation=${declaration#*/}
+    [[ $operation = $declaration ]] && operation=apply
+    barnyard[configuration]="$barnyard[archive]/conf/machines/$barnyard[hostname]/${name}.json"
+
+    [[ -e "$barnyard[configuration]" ]] ||
+        abend 'no configuration for operator %s' "$name"
+    tape=$(jq -er --arg implementation "barnyard.$name" '
+        if type != "object" then
+            error("operator configuration is not an object")
+        else
+            (._apply // "once") as $apply |
+            (._operator // $implementation) as $operator |
+            (._diff // []) as $diff |
+            if
+                ($apply | type) != "string" or
+                ($operator | type) != "string" or
+                ($diff | type) != "array" or
+                (all($diff[]; type == "string") | not)
+            then
+                error("invalid runner metadata")
+            else
+                [$apply, $operator, $diff[]] | @sh
+            end
+        end
+    ' "$barnyard[configuration]") ||
+        abend 'invalid operator configuration %s' "$barnyard[configuration]"
+    set -- "${(@QA)${(z)tape}}"
+    mode=${1:-}
+    implementation=${2:-}
+    shift 2
+    diffs=( "$@" )
+    [[ $implementation =~ '^barnyard(\.[a-z][a-z0-9_-]*)+$' ]] ||
+        abend 'invalid implementation %s for operator %s' "$implementation" "$name"
+
+    record_applied=$(( ${+barnyard[state]} ))
+    state=${barnyard[state]:-/var/lib/barnyard}
+    marker="$state/applied/$name"
+    mkdir -p "$state/applied"
+    applied=()
+
+    integer ran=0
+    if [[ -e $marker ]]; then
+        ran=1
+    else
+        ran=0
+    fi
+    case "$o_barnyard[always]-$mode" in
+        yes-* | *-always )
+            log run=1 ran=$ran operator="$name" program="$operation" apply=always msg= 'check dirty'
+            ;;
+        *-once )
+            if (( $ran )); then
+                log run=0 ran=1 operator="$name" program="$operation" apply=once msg= 'check dirty'
+                return
+            fi
+            log run=1 ran=0 operator="$name" program="$operation" apply=once msg= 'check dirty'
+            ;;
+        *-diff )
+            if (( $ran )); then
+                read -r -A applied < "$marker"
+                if [[ "$applied[1]" = "$o_barnyard[sha1]" ]]; then
+                    log run=0 ran=1 operator="$name" program="$operation" apply=diff msg= 'check dirty'
+                    return
+                fi
+                diffs+=( "machines/$barnyard[hostname]/${name}.json" )
+                if git -C "$o_barnyard[repository]" diff --quiet "$applied[1]" "$barnyard[sha1]" -- "${diffs[@]}"; then
+                    log run=0 ran=1 operator="$name" program="$operation" apply=diff msg= 'check dirty'
+                    return
+                fi
+                log run=1 ran=1 operator="$name" program="$operation" apply=diff msg= 'check dirty'
+            else
+                log run=1 ran=0 operator="$name" program="$operation" apply=diff msg= 'check dirty'
+            fi
+            ;;
+        *-never )
+            log run=0 ran=$ran operator="$name" program="$operation" apply=never msg= 'check dirty'
+            return
+            ;;
+        * )
+            abend 'invalid apply mode %s for operator %s' "$mode" "$name"
+            ;;
+    esac
+
+    (( barnyard[dry_run] || ! o_barnyard[limit] )) && return
+
+    extension="${barnyard[archive]}/code/barnyard"
+    [[ -d $extension ]] || abend 'operator extension missing at %s' "$extension"
+
+    command=( "${(@s:.:)${implementation#barnyard.}}" "$operation" )
+    if BARNYARD_ARCHIVE="$barnyard[archive]" \
+        BARNYARD_CONFIGURATION="$barnyard[configuration]" \
+        BARNYARD_EXTENSION="$extension" \
+        BARNYARD_HOSTNAME="$barnyard[hostname]" \
+        BARNYARD_OPERATOR="$name" \
+        BARNYARD_OPERATION="$operation" \
+        "$BARNYARD_PATH/barnyard" "${command[@]}"; then
+        code=0
+    else
+        code=$?
+    fi
+
+    if (( code )); then
+        log err code=$code operator="$name" 'operator %s exited %d' "$name" $code
+        return $code
+    fi
+
+    if [[
+        ( "$o_barnyard[repository]" = /var/lib/barnyard/repository || $record_applied = 1 ) &&
+        "$operation" = apply &&
+        "$o_barnyard[always]" = no
+    ]]; then
+        log operator="$name" "marking operator %s as applied" "$name"
+        git -C "$o_barnyard[repository]" log -n 1 --format='%H %at' "$barnyard[sha1]" > "${marker}.new" ||
+            return 1
+        mv -f "${marker}.new" "$marker"
+    fi
+
+    (( --o_barnyard[limit], 1 ))
+}
+___
+function barnyard_version_check {
+    [[ -v o_version ]] && {
+        [[ "$o_version" = "$BARNYARD_VERSION" ]] || abend "local=%s remote=%s %s" $o_version $BARNYARD_VERSION 'version mismatch, please run upgrade'
+    }
+}
+
+# TODO Not sure, too, what this naming convention was about, but it is a pretty
+# strong indicator that this is an internal function. I suppose it keeps the
+# namespace really clean.
+function :barnyard:order:operators {
+    typeset -a ordered
+    typeset operator tape
+
+    tape=$(jq -er '
+        if
+            type == "object" and
+            (keys == [ "order" ]) and
+            (.order |
+                type == "array" and
+                all(.[];
+                    type == "string" and
+                    test("^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*(/[a-z][a-z0-9_-]*)?$")
+                )
+            )
+        then
+            .order | @sh
+        else
+            error("invalid operator order")
+        end
+    ' "$o_barnyard[archive]/conf/machines/$o_barnyard[hostname]/order.json") ||
+        abend 'invalid operator order for %s' "$o_barnyard[hostname]"
+    set -- "${(@QA)${(z)tape}}"
+    ordered=( "$@" )
+
+    log info operators="${(j: :)ordered[@]}" 'running operators in order'
+
+    for operator in "${(@)ordered}"; do
+        :barnyard:run "$operator" || return 1
+    done
+}
+
+function :barnyard:apply:body {
+    typeset operator
+    umask 077
+    export BARNYARD_TEMP
+    BARNYARD_TEMP=$(mktemp -d) || abend 'unable to create temporary directory'
+    {
+        barnyard_version_check
+        [[ -e /etc/barnyard/branch ]] || abend 'branch is missing'
+        o_barnyard[branch]=$(</etc/barnyard/branch)
+        o_barnyard[hostname]=$(</etc/hostname)
+        o_barnyard[quiet]=$o_quiet
+
+        [[ -v o_ref ]] && o_barnyard[branch]=$o_ref
+
+        git config --global gpg.ssh.allowedSignersFile /etc/barnyard/allowed_signers
+        export GNUPGHOME=/etc/barnyard/gnupg
+        export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts'
+        if [[ "$o_barnyard[repository]" = "/var/lib/barnyard/repository" ]]; then
+            # TODO Left over from when some repositories were not mirrored.
+            if ! git -C "${o_barnyard[repository]}" config --get --bool remote.origin.mirror > /dev/null; then
+                remote=$(git -C "${o_barnyard[repository]}" config --get remote.origin.url)
+                rm -rf /var/lib/barnyard/repository
+                git clone --mirror "$remote" /var/lib/barnyard/repository
+            fi
+
+            if (( $o_barnyard[fetch] ));then
+                git -C "$o_barnyard[repository]" remote update --prune ||
+                    abend 'fatal: cannot update remote'
+            fi
+
+            o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} rev-parse $o_barnyard[branch])
+
+            o_barnyard[archive]=$BARNYARD_TEMP/run
+            barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf
+            o_barnyard[code]=$(jq -er --arg default "$(<$BARNYARD_TEMP/run/conf/code)" '
+                if type != "object" then
+                    error("machine configuration is not an object")
+                elif has("code") and (.code | type) != "string" then
+                    error("invalid machine code override")
+                else
+                    .code // $default
+                end
+            ' "$BARNYARD_TEMP/run/conf/machines/$o_barnyard[hostname]/machine.json") ||
+                abend 'invalid machine configuration for %s' "$o_barnyard[hostname]"
+            barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
+
+            if (( $# )); then
+                for operator in "$@"; do
+                    :barnyard:run "$operator" || exit 1
+                done
+            else
+                [[ "$o_barnyard[always]" = no ]] || abend 'always requires specific operators to run'
+                :barnyard:order:operators
+            fi
+        else
+            [[ -n "$SUDO_USER" ]] || abend 'must run through sudo'
+            # TODO Not a good check, check harder.
+            [[ -d "$o_barnyard[repository]" ]] ||
+                abend 'no barnyard at path %s' "${(qqq)o_barnyard[repository]}"
+
+            typeset barnyard_user
+            barnyard_user=$(stat -c '%U' "$(git -C "${o_barnyard[repository]}/conf" rev-parse --git-dir)/index") ||
+                abend 'not a git repo %s' "$o_barnyard[repository]/conf"
+
+            [[ "$barnyard_user" == $SUDO_USER ]] ||
+                abend 'sudo user %s does not own %s' ${(qqq)SUDO_USER} ${(qqq)o_barnyard[repository]}
+
+            o_barnyard[archive]="$BARNYARD_TEMP/run"
+            mkdir -p "$BARNYARD_TEMP/run"
+            cp -R "$o_barnyard[repository]"/* "$BARNYARD_TEMP/run"
+            o_barnyard[repository]="$o_barnyard[repository]/conf"
+            for operator in "$@"; do
+                :barnyard:run $operator || exit 1
+            done
+        fi
+    } always {
+        [[ -d $BARNYARD_TEMP ]] && rm -rf $BARNYARD_TEMP
+    }
+}
+
+function :barnyard:apply {
+    zmodload zsh/system || abend 'unable to load zsh/system for the apply lock'
+
+    typeset lock=${o_barnyard[lock]:-/run/lock/barnyard.apply}
+    typeset lockfd holder
+    touch "$lock" || abend 'unable to create apply lock %s' "$lock"
+    if ! zsystem flock -t 0 -f lockfd "$lock" 2>/dev/null; then
+        holder=$(<"$lock") 2>/dev/null
+        [[ -n $holder ]] || holder='holder unknown'
+        abend 'another Barnyard apply is running (%s)' "$holder"
+    fi
+    holder="pid=$sysparams[pid] operation=${o_barnyard[operation]:-apply}"
+    ( print -r -- "$holder" ) >| "$lock" ||
+        abend 'unable to record holder in apply lock %s' "$lock"
+
+    {
+        :barnyard:apply:body "$@"
+    } always {
+        zsystem flock -u $lockfd
+    }
+}
+
+function :help:always {
+    heredoc -v help -q <<'    EOF'
+        # desc -- force operators to converge
+        Run the named operators regardless of their applied state.
+        # opt version
+        Require this Barnyard version on the machine.
+        # opt repository
+        Read Barnyard configuration and code from this repository.
+        # opt quiet
+        Suppress ordinary output.
+        # opt fetch
+        Fetch the repository before applying operators.
+        # opt check-signature
+        Verify the selected commits before extracting them.
+        # opt help
+        Display help for \`barnyard always\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard always\` converges the named operators even when their applied
+        markers say they have already run.
+
+        Apply operations are serialized across the machine. If another
+        \`apply\` or \`always\` operation holds the lock, this command fails
+        immediately and reports the holder's process ID and operation.
+        ## OPTIONS
+        > options
+    EOF
+}
+
+function :args:always {
+    typeset o_repository=/var/lib/barnyard/repository
+    integer o_check_signature=1
+    eval "$(args -@ v,version -d r,repository -b q,quiet f,fetch -d! c,check-signature -bx h,help -- "$@")"
+}
+
+function :execute:always {
+    typeset -A o_barnyard=(
+        always yes
+        operation always
+        repository ${o_repository:A}
+        fetch $o_fetch
+        limit $(( 16#7fffffffffffffff ))
+    )
+    :barnyard:apply "$@"
+}
+
+function :help:apply {
+    heredoc -v help -q <<'    EOF'
+        # desc -- converge the machine
+        Converge the machine from its generated configuration.
+        # opt limit
+        Stop after running this many operators.
+        # opt version
+        Require this Barnyard version on the machine.
+        # opt ref
+        Use this configuration ref for a dry run.
+        # opt repository
+        Read Barnyard configuration and code from this repository.
+        # opt dry-run
+        Report the operators that would run without running them.
+        # opt quiet
+        Suppress ordinary output.
+        # opt check-signature
+        Verify the selected commits before extracting them.
+        # opt help
+        Display help for \`barnyard apply\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard apply\` reads the generated machine configuration and
+        converges its operators in the recorded order.
+
+        Apply operations are serialized across the machine. If another
+        \`apply\` or \`always\` operation holds the lock, this command fails
+        immediately and reports the holder's process ID and operation.
+        ## OPTIONS
+        > options
+    EOF
+}
+
+function :args:apply {
+    typeset o_repository=/var/lib/barnyard/repository
+    integer o_check_signature=1
+    integer o_limit=$(( 16#7fffffffffffffff ))
+    eval "$(args -@ -d l,limit v,version R,ref -d r,repository -b d,dry-run q,quiet -d! c,check-signature -bx h,help -- "$@")"
+}
+
+function :execute:apply {
+    [[ -v o_ref && $o_dry_run = 0 ]] && abend 'cannot specify ref except for dry-run'
+    (( $# )) && abend 'barnyard apply takes no positional arguments'
+    typeset -A o_barnyard=(
+        always no
+        operation apply
+        repository "${o_repository:A}"
+        dry_run $o_dry_run
+        fetch 1
+        limit $o_limit
+    )
+    :barnyard:apply "$@"
+}
+
+# TODO Hard won and it works.
+function barnyard_systemd {
+    # We're going to only be interested in log entries emitted after we start
+    # our unit, so we capture the journal cursor now.
+    [[ "$(journalctl -q -e -n 1 -o verbose)" =~ ^.*\\[(.*)\\] ]]
+    typeset cursor=$match[1]
+
+    # Tail the barnyard logs from this point if we successfully start the unit.
+    typeset since="$(date --iso-8601=seconds | sed -e 's/T/ /' -e 's/\+.*//')"
+
+    # Attempt to start the unit. The `--collect` argument will delete the
+    # transient unit regardless of exit status. We set an environment variable
+    # that we'll use to assert that the running unit is the unit we ran.
+    systemd-run --setenv BARNYARD_PID=$$ --collect --unit barnyard $BARNYARD_PATH/barnyard "$@" || exit 1
+
+    # Grap a snapshot of the properties of the currently running unit.
+    typeset line
+    typeset -A properties
+    typeset -a split
+    while read -r line; do
+        split=( "${(@s:=:)line}" )
+        properties[$split[1]]="$split[2]"
+    done < <(systemctl show --property MainPID --property InvocationID barnyard)
+
+    # Check that there is a barnyard unit running.
+    (( $properties[MainPID] )) || abend 'barnyard exited awfully quick'
+
+    # Assert that we are the ones who ran it.
+    # https://askubuntu.com/questions/978711/how-do-i-split-a-proc-environ-file-in-separate-lines
+    [[ $(xargs -0 -L1 -a "/proc/${properties[MainPID]}/environ" | awk -v pid=$$ -F= '$1 == "BARNYARD_PID" && $2 == pid { print "true" }') = true ]] || \
+        abend 'someone else started this barnyard unit'
+
+    # Start tailing the unit.
+    journalctl --quiet --cursor "$cursor" --no-hostname --no-pager -fe --unit barnyard &
+    typeset jctl=$!
+    trap "kill $jctl" EXIT
+
+    # Here we block. We tail `journalctl` until we see an exit message, either
+    # success or failure. It will be a single line so we pipe to head to get the
+    # line. When head exits this pipeline exits. Likely the user will have seen
+    # the final messages on in their terminal as well.
+    journalctl --quiet --cursor "$cursor" --follow --unit barnyard \
+        INVOCATION_ID=$properties[InvocationID] \
+        MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
+        MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15 | \
+    head -n 1 > /dev/null
+
+    # We get the exit message again, this time to determine the exit code.
+    typeset -A outcome
+    while read -r line; do
+        [[ "$line" =~ ^([^=]+)=(.*)$ ]] || continue
+        outcome[$match[1]]=$match[2]
+    done < <(
+        journalctl --quiet --cursor "$cursor" --unit barnyard --output export --output-fields EXIT_STATUS,MESSAGE,MESSAGE_ID \
+            INVOCATION_ID=$properties[InvocationID] \
+            MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
+            MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15
+    )
+
+    # If it was an error message, return the error exit code.
+    # TODO `return` is unnecessary, isn't it?
+    [[ $outcome[MESSAGE_ID] = 98e322203f7a4ed290d09fe03c09fe15 ]] && return $outcome[EXIT_STATUS]
+}
+
+# TODO This should be a flag... --systemd.
+function command_barnyard_systemd_always {
+    eval "$(barnyard_parse_arguments systemd_always v,version: h,help -- "$@")"
+    barnyard_version_check
+    barnyard_systemd always "$@"
+}
+
+function command_barnyard_systemd_apply {
+    eval "$(barnyard_parse_arguments systemd_apply d,dry-run v,version: h,help -- "$@")"
+    barnyard_version_check
+    typeset -a dry_run
+    (( $o_dry_run )) && dry_run+=( '--dry-run' )
+    barnyard_systemd apply "${(@)dry_run}" "$@"
+}
+
+function command_barnyard_systemd {
+    eval "$(barnyard_parse_arguments systemd v,version: h,help -- "$@")"
+    barnyard_next_command barnyard_systemd "$@"
+}
+
+# Could argue that the repository should never change, but it comes from outside
+# and so yes, it could change. You might want to rename your repository, why
+# not? It's not immutable like the age or gpg key.
+
+function :args:clone {
+    eval "$(args 'r,repository' v,version -bx h,help -- "$@")"
+}
+
+function :execute:clone {
+    barnyard_version_check
+    [[ -v o_repository ]] || abend 'a git repository url is required'
+    exemplar :barnyard:clone
+}
+
+function :barnyard:clone {
+    typeset repository=${o_repository%\#*} branch=${o_repository##*\#}
+    typeset ref=refs/heads/$branch
+    typeset tmp staged_branch
+    tmp=$(mktemp -d /var/lib/barnyard/bootstrap.XXXXXX) ||
+        abend 'unable to create a repository staging directory'
+    staged_branch=$(mktemp /etc/barnyard/branch.XXXXXX) ||
+        { rm -rf "$tmp"; abend 'unable to create a staged Barnyard branch' }
+    {
+        block 'clone'
+        {
+            (){ [[ -e /etc/barnyard/id_barnyard ]] }
+            (){ [[ -e /etc/barnyard/known_hosts ]] }
+            (){ export GIT_SSH_COMMAND='ssh -i /etc/barnyard/id_barnyard -o IdentitiesOnly=yes -o UserKnownHostsFile=/etc/barnyard/known_hosts' }
+            (){
+                % $repository $tmp/repository
+                git clone --mirror %q %q
+            }
+            (){
+                % $tmp/repository
+                [[ $(git -C %q rev-parse --is-bare-repository) = true ]]
+            }
+            (){
+                % $tmp/repository $ref
+                git -C %q show-ref --verify --quiet %q
+            }
+            (){
+                % $branch $staged_branch
+                print -r -- %q > %q
+            }
+            (){ [[ ! -e $tmp/previous ]] }
+            (){
+                [[ ! -e /var/lib/barnyard/repository ]] ||
+                    mv /var/lib/barnyard/repository $tmp/previous
+            }
+            (){
+                if ! mv $tmp/repository /var/lib/barnyard/repository; then
+                    [[ ! -e $tmp/previous ]] ||
+                        mv $tmp/previous /var/lib/barnyard/repository
+                    return 1
+                fi
+            }
+            (){ % $staged_branch; mv %q /etc/barnyard/branch }
+        } always {
+            caught
+        } > >(indent)
+    } always {
+        if [[ -e $tmp/previous && ! -e /var/lib/barnyard/repository ]]; then
+            mv $tmp/previous /var/lib/barnyard/repository ||
+                abend 'unable to restore the previous repository from %s' "$tmp/previous"
+        fi
+        [[ -e $config ]] && rm -f $config
+        [[ -d $tmp ]] && rm -rf $tmp
+    }
+}
+
+function :args:commit {
+    eval "$(args v,version -bx h,help -- "$@")"
+}
+
+function :execute:commit {
+    barnyard_version_check
+    ( cd /var/lib/barnyard/commit && tar -czf - * | base64 )
+}
+
+function :args:gpg:trust {
+    eval "$(args p,fingerprint v,version -bx h,help -- "$@")"
+}
+
+function :barnyard:gpg:trust {
+    block 'trust GPG fingerprint'
+    {
+        (){ (( $EUID == 0 )) }
+        (){
+            % $o_fingerprint
+            GNUPGHOME=/etc/barnyard/gnupg gpg --batch --yes --sign-key %q
+        }
+        (){ GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys }
+    } always {
+        caught
+    } > >(indent)
+}
+
+# TODO And furthermore, that signing... that was stretch, wasn't it?
+
+# TODO Oh! Oh! birdonwire can be a barnyard extension! (Wireguard specific.)
+function :execute:gpg:trust {
+    barnyard_version_check
+    [[ -v o_fingerprint ]] || abend 'a GPG public key fingerprint is required'
+    exemplar :barnyard:gpg:trust
+}
+
+function :barnyard:gpg:import {
+    typeset gpg_key
+    block 'add GPG signing key'
+    {
+        (){ (( $EUID == 0 )) }
+        if [[ $o_file = - ]]; then
+            try show eval 'gpg_key=$(cat)' || tried
+        else
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; gpg_key=$(<%q) }
+        fi
+        (){ GNUPGHOME=/etc/barnyard/gnupg gpg --import <(printf %s "$gpg_key") }
+        (){ GNUPGHOME=/etc/barnyard/gnupg gpg --list-keys }
+    } always {
+        caught
+    } > >(indent)
+}
+
+function :args:gpg {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:gpg {
+    delegate "$@"
+}
+
+function :args:control {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :help:control {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Run operator-side Barnyard commands.
+        # opt help
+        Display help for \`barnyard control\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control\` is the operator side of Barnyard, run where you sit.
+        It prepares machines, reaches in over SSH for bootstrap work, and
+        directs the machine-side agent commands.
+
+        Barnyard uses \`control\` and \`agent\`, not client and server. The machine
+        side does not serve requests; it acts. \`control\` directs, and \`agent\`
+        does the work on the box.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following commands are available under \`barnyard control\`.
+        > commands
+    EOF
+}
+
+function :execute:control {
+    delegate "$@"
+}
+
+function :help:control:generate {
+    heredoc -v help -q <<'    EOF'
+        # desc -- compile machine manifests
+        Compile Barnyard machine manifests into stable JSON.
+        # opt exclude -- < pattern >
+        Exclude hostnames matching the Zsh pattern.
+        # opt include -- < pattern >
+        Include only hostnames matching the Zsh pattern.
+        # opt help
+        Display help for \`barnyard control generate\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control generate\` compiles one or more \`machines.zsh\`
+        manifests into the per-machine JSON read by the Barnyard agent. It writes
+        one stable, sorted JSON file per named operator and an ordered \`order.json\`
+        beside them.
+
+        Run this command from the configuration worktree. Regeneration replaces
+        each selected machine directory so the resulting Git diff is the complete
+        change in desired state.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard control\` for the operator side of Barnyard.
+    EOF
+}
+
+function :args:control:generate {
+    typeset o_include='*'
+    eval "$(args -@ -d i,include e,exclude -bx h,help -- "$@")"
+}
+
+function :barnyard:generate:args {
+    typeset argument key value variable
+    typeset -A arguments arrays associative_arrays scalars
+    typeset -a array remainder
+
+    while (( $# )); do
+        argument=$1
+        shift
+        case "$argument" in
+            %* )
+                key=${argument#%}
+                if [[ ! $key =~ '^[a-zA-Z_][a-zA-Z0-9_]*$' ]]; then
+                    print -R "abend 'invalid role macro argument %s' ${(q)argument}"
+                    return
+                fi
+                # An undefined name expands to a single empty word, which
+                # would be emitted as an odd-length associative assignment.
+                # The eval of that dies as a parse error, and a parse error
+                # discards the whole eval program, so every other assignment
+                # in this call is lost and the macro runs on with its
+                # defaults and no failure anywhere. Refuse the name instead,
+                # the way the operator parser refuses it.
+                if (( ! ${+parameters[$key]} )); then
+                    print -R "abend 'unknown associative array %s' ${(q)key}"
+                    return
+                fi
+                associative_arrays[$key]=1
+                if (( ${+arguments[$key]} )); then
+                    array=( "${(@Q)${(@z)arguments[$key]}}" )
+                else
+                    array=()
+                fi
+                array+=( "${(@kv)${(P)key}}" )
+                arguments[$key]="${(@qq)array}"
+                ;;
+            *=* )
+                key=${argument%%=*}
+                value=${argument#*=}
+                if [[ $key = *+ ]]; then
+                    key=${key%+}
+                    if [[ ! $key =~ '^[a-zA-Z_][a-zA-Z0-9_]*$' ]]; then
+                        print -R "abend 'invalid role macro argument %s' ${(q)argument}"
+                        return
+                    fi
+                    arrays[$key]=1
+                    if (( ${+arguments[$key]} )); then
+                        array=( "${(@Q)${(@z)arguments[$key]}}" )
+                    else
+                        array=()
+                    fi
+                    array+=( "$value" )
+                    arguments[$key]="${(@qq)array}"
+                else
+                    if [[ ! $key =~ '^[a-zA-Z_][a-zA-Z0-9_]*$' ]]; then
+                        print -R "abend 'invalid role macro argument %s' ${(q)argument}"
+                        return
+                    fi
+                    scalars[$key]=1
+                    arguments[$key]=${value:q}
+                fi
+                ;;
+            * )
+                remainder+=( "$argument" )
+                ;;
+        esac
+    done
+
+    for variable in "${(@k)associative_arrays}"; do
+        print -R "typeset -A $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)arrays}"; do
+        print -R "typeset -a $variable=($arguments[$variable])"
+    done
+    for variable in "${(@k)scalars}"; do
+        print -R "typeset $variable=$arguments[$variable]"
+    done
+    print -R "set -- ${(@qq)remainder}"
+}
+
+function :barnyard:generate:json:set {
+    typeset json=${1:-} key=${2:-} value=${3:-}
+    jq -ceS --arg key "$key" --arg value "$value" '
+        if has($key) and (.[$key] | type) == "array" then
+            error("cannot replace array property \($key) with a scalar")
+        else
+            .[$key] = $value
+        end
+    ' <<< "$json"
+}
+
+function :barnyard:generate:json:append {
+    typeset json=${1:-} key=${2:-} value=${3:-}
+    jq -ceS --arg key "$key" --arg value "$value" '
+        if has($key) and (.[$key] | type) != "array" then
+            error("cannot append to scalar property \($key)")
+        else
+            .[$key] = ((.[$key] // []) + [$value])
+        end
+    ' <<< "$json"
+}
+
+function :barnyard:generate:json:write {
+    typeset file=${1:-} json=${2:-}
+    print -r -- "$json" |
+        jq -eS 'if type == "object" then . else error("configuration must be an object") end' > "$file" ||
+            abend 'unable to write JSON configuration %s' "$file"
+}
+
+function :barnyard:generate:values {
+    setopt localoptions extendedglob
+    typeset kind=${1:-} file=${2:-}
+    shift 2
+    typeset argument array_name implementation= json='{}' key map_name mode= value
+
+    while (( $# )); do
+        argument=$1
+        shift
+        case "$argument" in
+            once | diff | always | never )
+                [[ $kind = operator ]] || abend 'apply mode is not valid machine metadata'
+                [[ -z $mode ]] || abend 'multiple apply modes for %s' "$file"
+                mode=$argument
+                json=$(:barnyard:generate:json:set "$json" _apply "$argument") ||
+                    abend 'invalid apply mode for %s' "$file"
+                ;;
+            barnyard.* )
+                [[ $kind = operator ]] || abend 'implementation is not valid machine metadata'
+                [[ -z $implementation ]] || abend 'multiple implementations for %s' "$file"
+                [[ $argument =~ '^barnyard(\.[a-z][a-z0-9_-]*)+$' ]] ||
+                    abend 'invalid implementation %s' "$argument"
+                implementation=$argument
+                ;;
+            [a-zA-Z_][a-zA-Z0-9_]#@=* )
+                key=${argument%%@=*}
+                array_name=${argument#*@=}
+                [[ $array_name =~ '^[a-zA-Z_][a-zA-Z0-9_]*$' ]] ||
+                    abend 'invalid array reference %s' "$argument"
+                (( ${+parameters[$array_name]} )) ||
+                    abend 'unknown array %s' "$array_name"
+                for value in "${(@P)array_name}"; do
+                    json=$(:barnyard:generate:json:append "$json" "$key" "$value") ||
+                        abend 'invalid array property %s' "$key"
+                done
+                ;;
+            [a-zA-Z_][a-zA-Z0-9_]#\+=* )
+                key=${argument%%+=*}
+                value=${argument#*+=}
+                json=$(:barnyard:generate:json:append "$json" "$key" "$value") ||
+                    abend 'invalid array property %s' "$key"
+                ;;
+            [a-zA-Z_][a-zA-Z0-9_]#=* )
+                key=${argument%%=*}
+                value=${argument#*=}
+                json=$(:barnyard:generate:json:set "$json" "$key" "$value") ||
+                    abend 'invalid scalar property %s' "$key"
+                ;;
+            %[a-zA-Z_][a-zA-Z0-9_]# )
+                map_name=${argument#%}
+                (( ${+parameters[$map_name]} )) ||
+                    abend 'unknown associative array %s' "$map_name"
+                for key value in "${(@Pkv)map_name}"; do
+                    json=$(:barnyard:generate:json:set "$json" "$key" "$value") ||
+                        abend 'invalid scalar property %s' "$key"
+                done
+                ;;
+            * )
+                abend 'unknown configuration value %s for %s' "$argument" "$file"
+                ;;
+        esac
+    done
+
+    REPLY=$json
+    reply=( "$implementation" )
+}
+
+function :barnyard:generate:machine {
+    typeset hostname=${1:-}
+    shift
+    typeset disabled=$@[(Ie)enabled=0]
+    typeset tape
+    o_barnyard[hostname]=$hostname
+    __o_registers[excluded]=1
+    __o_order=()
+    # Cleared for every declaration, including the ones this run skips, so a
+    # role called under a later machine cannot read metadata left behind by an
+    # earlier one.
+    o_machine=()
+    if [[ $hostname = $~o_barnyard[include] &&
+        ( -z $o_barnyard[exclude] || $hostname != $~o_barnyard[exclude] ) ]]
+    then
+        if (( disabled )); then
+            rm -rf "age/$hostname" "machines/$hostname" "resources/$hostname"
+        else
+            __o_registers[excluded]=0
+            rm -rf "machines/$hostname"
+            mkdir -p "machines/$hostname"
+            :barnyard:generate:values machine "machines/$hostname/machine.json" "$@"
+            :barnyard:generate:json:write "machines/$hostname/machine.json" "$REPLY"
+            # Role macros are promised the machine's metadata before they are
+            # expanded, and read it to decide what to record -- whether a
+            # machine is still bootstrapping decides whether its role declares
+            # sshpop. The values come back out of the compiled object rather
+            # than off the declaration a second time, so there is one reading
+            # of the manifest line and the roles see exactly what was written.
+            tape=$(jq -er 'to_entries | map(.key, .value) | @sh' <<< "$REPLY") ||
+                abend 'unable to read machine metadata for %s' "$hostname"
+            o_machine=( "${(@QA)${(z)tape}}" )
+            jq -nS --args '{ order: $ARGS.positional }' -- > "machines/$hostname/order.json" ||
+                abend 'unable to initialize operator order for %s' "$hostname"
+        fi
+    fi
+}
+
+function :barnyard:generate:operator {
+    (( __o_registers[excluded] )) && return
+    typeset declaration=${1:-}
+    shift
+    [[ -n $declaration ]] || abend 'operator name is required'
+    if [[ $declaration = @* ]]; then
+        "$declaration" "$@"
+        return
+    fi
+
+    [[ $declaration =~ '^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*(/[a-z][a-z0-9_-]*)?$' ]] ||
+        abend 'invalid operator declaration %s' "$declaration"
+
+    typeset name=${declaration%%/*}
+    typeset file="machines/${o_barnyard[hostname]}/${name}.json"
+    typeset -a reply
+    :barnyard:generate:values operator "$file" "$@"
+    typeset implementation=${reply[1]:-}
+    if [[ -n $implementation && $implementation != barnyard.$name ]]; then
+        REPLY=$(:barnyard:generate:json:set "$REPLY" _operator "$implementation") ||
+            abend 'invalid implementation for %s' "$name"
+    fi
+    :barnyard:generate:json:write "$file" "$REPLY"
+
+    __o_order+=( "$declaration" )
+    jq -nS --args '{ order: $ARGS.positional }' -- "${__o_order[@]}" \
+        > "machines/${o_barnyard[hostname]}/order.json" ||
+            abend 'unable to write operator order for %s' "$o_barnyard[hostname]"
+}
+
+function :barnyard:control:generate {
+    # A manifest is a program, and sourcing one runs its statements to the end
+    # whatever they return, so a role that fails and a later line that succeeds
+    # leave the source reporting the last line. That is a compile that wrote
+    # part of a machine and called it a success. err_return is dynamically
+    # scoped, so it reaches the roles the manifest calls as well as the
+    # manifest itself, and an unhandled failure returns through the role, the
+    # recorder, the source and the compiling subshell.
+    setopt localoptions err_return
+    typeset include=${1:-\*} exclude=${2:-} configuration=${3:-}
+    typeset -A o_barnyard=( include "$include" exclude "$exclude" )
+    typeset -A __o_registers=( excluded 1 )
+    typeset -A o_machine
+    typeset -a __o_order
+
+    # The manifest's vocabulary lives only for this isolated compilation.
+    function machine { :barnyard:generate:machine "$@" }
+    function @ { :barnyard:generate:operator "$@" }
+    function @_args { :barnyard:generate:args "$@" }
+    function command_not_found_handler {
+        abend 'manifest called undefined function %s' "$1"
+    }
+    source "$configuration"
+}
+
+function :execute:control:generate {
+    (( $# )) || abend 'at least one machines.zsh manifest is required'
+    typeset configuration
+    for configuration in "$@"; do
+        [[ ${configuration:e} = zsh ]] || continue
+        [[ -r $configuration ]] || abend 'manifest is not readable: %s' "$configuration"
+        ( :barnyard:control:generate "$o_include" "${o_exclude:-}" "$configuration" ) ||
+            return 1
+    done
+}
+
+function :barnyard:control:send {
+    typeset destination=${1:-}
+    ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 \
+        -o StrictHostKeyChecking=yes -- "$destination" \
+        '/usr/bin/sudo -n /usr/local/bin/barnyard agent bootstrap'
+}
+
+function :help:control:bootstrap {
+    heredoc -v help -q <<'    EOF'
+        # desc -- configure a prepared Barnyard agent
+        Configure a prepared Barnyard agent from one JSON payload.
+        # opt branch -- < branch >
+        # opt allowed-signers -- < allowed signers file >
+        # opt destination -- < ssh destination >
+        # opt fingerprint -- < gpg fingerprint >
+        # opt gpg -- < public key file >
+        # opt known -- < known_hosts file >
+        # opt repository -- < repository url >
+        # opt ssh -- < private key file >
+        # opt help
+        Display help for \`barnyard control bootstrap\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control bootstrap\` builds one canonical JSON description of
+        the agent's repository and trust material, then sends it over one
+        strictly verified SSH connection to \`barnyard agent bootstrap\`.
+
+        Public keys and fingerprints may be repeated. File contents are read
+        by \`jo\`; secret material never appears in process arguments. Every
+        option except \`--destination\` is optional. Present properties converge;
+        absent properties remain unmanaged.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard control prepare\` installs Barnyard before bootstrap runs.
+        \`barnyard agent bootstrap\` validates and applies the payload.
+    EOF
+}
+
+function :args:control:bootstrap {
+    eval "$(args d,destination A,allowed-signers k,known s,ssh -a g,gpg -a f,fingerprint \
+        -s r,repository -s b,branch -bx h,help -- "$@")"
+}
+
+function :execute:control:bootstrap {
+    [[ -v o_destination ]] || abend 'an SSH destination is required'
+    (( ${+o_allowed_signers} || ${+o_known} || ${+o_ssh} || ${#o_gpg} || ${#o_fingerprint} ||
+        ${+o_repository} || ${+o_branch} )) || abend 'nothing to bootstrap'
+    [[ ! -v o_allowed_signers || -r $o_allowed_signers ]] ||
+        abend 'allowed signers file is not readable: %s' "$o_allowed_signers"
+    [[ ! -v o_known || -r $o_known ]] || abend 'known_hosts file is not readable: %s' "$o_known"
+    [[ ! -v o_ssh || -r $o_ssh ]] || abend 'SSH private key file is not readable: %s' "$o_ssh"
+    if [[ -v o_repository || -v o_branch ]]; then
+        [[ -v o_repository && -n $o_repository ]] || abend 'a repository URL is required with --branch'
+        [[ -v o_branch && -n $o_branch ]] || abend 'a repository branch is required with --repository'
+    fi
+
+    typeset file
+    for file in "${(@)o_gpg}"; do
+        [[ -r $file ]] || abend 'GPG public key file is not readable: %s' "$file"
+    done
+
+    # The payload carries material, not claims about the machine. A machine
+    # knows its own hostname from Terraform and its own distribution from
+    # /etc/os-release, and the control side has no independent source for
+    # either, so any assertion it sent would be a guess wearing a check.
+    # Reaching the intended machine is already settled one layer down, where
+    # :barnyard:control:send pins the host key with StrictHostKeyChecking.
+    typeset -a properties=(
+        -s "version=$BARNYARD_VERSION"
+    )
+    [[ -v o_allowed_signers ]] && properties+=( "ssh.allowed_signers=@$o_allowed_signers" )
+    [[ -v o_known ]] && properties+=( "ssh.known_hosts=@$o_known" )
+    [[ -v o_ssh ]] && properties+=( "ssh.private_key=@$o_ssh" )
+    if [[ -v o_repository ]]; then
+        properties+=( -s "repository.url=$o_repository" -s "repository.branch=$o_branch" )
+    fi
+    for file in "${(@)o_gpg}"; do
+        properties+=( "gpg.import[]=@$file" )
+    done
+    for file in "${(@)o_fingerprint}"; do
+        properties+=( -s "gpg.trust[]=$file" )
+    done
+
+    jo -d. -- "${(@)properties}" |
+        :barnyard:control:send "$o_destination" ||
+            abend 'unable to bootstrap %s' "$o_destination"
+}
+
+function :args:control:prepare {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :help:control:prepare {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Prepare a machine to run the Barnyard agent.
+        # opt help
+        Display help for \`barnyard control prepare\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control prepare\` prepares a remote machine to host the
+        Barnyard agent. The distribution-specific leaf command installs the
+        base toolchain, installs zshctl, copies the current Barnyard executable
+        into place, and then runs the agent's local preparation step on the
+        machine.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following prepare targets are available.
+        > commands
+    EOF
+}
+
+function :execute:control:prepare {
+    delegate "$@"
+}
+
+function :args:control:prepare:ubuntu {
+    eval "$(args -d d,destination -bx h,help -- "$@")"
+}
+
+function :help:control:prepare:ubuntu {
+    heredoc -v help -q <<'    EOF'
+        # desc -- prepare an Ubuntu machine over SSH
+        Prepare an Ubuntu machine to run the Barnyard agent.
+        # opt destination -- < ssh destination >
+        # opt help
+        Display help for \`barnyard control prepare ubuntu\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control prepare ubuntu\` connects to the SSH destination and
+        pipes a bootstrap script to remote \`sudo -n /bin/bash\`.
+
+        The bootstrap installs \`zsh\`, \`gnupg2\`, \`git\`, \`age\`, \`rsync\`, \`jo\`,
+        and \`jq\`; installs zshctl; writes the current Barnyard executable to
+        \`/usr/local/bin/barnyard\`; and runs \`barnyard agent prepare ubuntu\` on
+        the remote machine.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard control\` for the operator side of Barnyard.
+
+        \`barnyard agent prepare ubuntu\` for the machine-local preparation step.
+    EOF
+}
+
+function :execute:control:prepare:ubuntu {
+    [[ -v o_destination ]] || abend 'a destination is required'
+
+    typeset source=${${(%):-%x}:A} bootstrap
+    bootstrap=$(resource control_prepare_ubuntu $source)
+    [[ -n $bootstrap ]] || abend 'bootstrap resource is missing from %s' $source
+
+    {
+        barnyard_source
+        print -r -- "$bootstrap"
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 -- "$o_destination" '/usr/bin/sudo -n /bin/bash' ||
+        abend 'unable to prepare %s' "$o_destination"
+}
+
+function barnyard_source {
+    typeset barnyard=$(<${${(%):-%x}:A})
+    heredoc -f "$barnyard" <<'    EOF'
+        set -e
+        set -o pipefail
+        BARNYARD_SOURCE=$(cat <<'EndOfBarnyard'
+        %s
+        EndOfBarnyard
+        )
+    EOF
+}
+
+function :help:agent {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Run machine-side Barnyard commands.
+        # opt help
+        Display help for \`barnyard agent\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent\` is the machine side of Barnyard. It runs on the box
+        and performs the work that changes local state.
+
+        Some agent commands, such as \`apply\` and \`always\`, are run by hand on
+        the machine. Others are reached by \`barnyard control\` over SSH during
+        bootstrap and setup.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following commands are available under \`barnyard agent\`.
+        > commands
+    EOF
+}
+
+function :args:agent {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent {
+    delegate "$@"
+}
+
+function :help:agent:bootstrap {
+    heredoc -v help -q <<'    EOF'
+        # desc -- configure a prepared Barnyard agent
+        Configure a prepared Barnyard agent from standard input.
+        # opt help
+        Display help for \`barnyard agent bootstrap\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent bootstrap\` validates one complete JSON description
+        before writing machine state, then applies whichever SSH, GPG, and
+        repository properties are present in order. Absent properties remain
+        unmanaged.
+
+        The payload carries material only. A machine's hostname and
+        distribution are its own, so the control side does not assert them
+        and the agent does not check them against a claim.
+
+        A failed run stops at the first failed applier. Re-running converges the
+        provisioning artifacts; it does not regenerate the machine's identity.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard agent prepare ubuntu\` creates the machine identity.
+        \`barnyard control bootstrap\` constructs and sends this payload.
+    EOF
+}
+
+function :args:agent:bootstrap {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent:bootstrap {
+    (( $# == 0 )) || abend 'barnyard agent bootstrap takes no arguments'
+    :barnyard:agent:bootstrap
+}
+
+function :barnyard:hostname {
+    [[ -r /etc/hostname ]] || abend 'unable to read /etc/hostname'
+    print -r -- "$(</etc/hostname)"
+}
+
+function :barnyard:agent:bootstrap {
+    setopt localoptions pipefail
+    umask 077
+
+    typeset payload
+    payload=$(cat) || abend 'unable to read the bootstrap payload'
+    [[ -n $payload ]] || abend 'bootstrap payload is empty'
+
+    printf '%s' "$payload" | jq -e '
+        def keys_are($allowed): ((keys - $allowed) | length) == 0;
+        type == "object" and
+        keys_are([ "gpg", "repository", "ssh", "version" ]) and
+        has("version") and
+        (has("ssh") or has("gpg") or has("repository")) and
+        (.version | type == "string" and length > 0) and
+        ((has("ssh") | not) or
+            (.ssh | type == "object" and length > 0 and
+                keys_are([ "allowed_signers", "known_hosts", "private_key" ]) and
+                ((has("allowed_signers") | not) or
+                    (.allowed_signers | type == "string" and length > 0)) and
+                ((has("known_hosts") | not) or
+                    (.known_hosts | type == "string" and length > 0)) and
+                ((has("private_key") | not) or
+                    (.private_key | type == "string" and length > 0)))) and
+        ((has("gpg") | not) or
+            (.gpg | type == "object" and length > 0 and
+                keys_are([ "import", "trust" ]) and
+                ((has("import") | not) or
+                    (.import | type == "array" and length > 0 and
+                        all(.[]; type == "string" and length > 0))) and
+                ((has("trust") | not) or
+                    (.trust | type == "array" and length > 0 and
+                        all(.[]; type == "string" and
+                            test("^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$")))))) and
+        ((has("repository") | not) or
+            (.repository | type == "object" and
+                ((keys | sort) == [ "branch", "url" ]) and
+                (.url | type == "string" and length > 0 and (contains("#") | not)) and
+                (.branch | type == "string" and length > 0 and (contains("#") | not))))
+    ' > /dev/null || abend 'invalid bootstrap payload'
+
+    typeset o_version
+    o_version=$(printf '%s' "$payload" | jq -er '.version') ||
+        abend 'unable to read the bootstrap version'
+    barnyard_version_check
+
+    integer index count
+    typeset preflight key_listing line fingerprint
+    typeset -a fields
+    typeset -A available_fingerprints
+    if printf '%s' "$payload" | jq -e 'has("gpg")' > /dev/null; then
+        preflight=$(mktemp -d) || abend 'unable to create a GPG preflight directory'
+        {
+            chmod 700 "$preflight" || abend 'unable to secure the GPG preflight directory'
+            count=$(printf '%s' "$payload" | jq -er '(.gpg.import // []) | length') ||
+                abend 'unable to count GPG public keys'
+            for (( index = 0; index < count; index++ )); do
+                key_listing=$(
+                    printf '%s' "$payload" |
+                        jq -jr --argjson index $index '.gpg.import[$index]' |
+                        GNUPGHOME=$preflight gpg --batch --with-colons --show-keys
+                ) || abend 'GPG public key %d is invalid' $(( index + 1 ))
+                for line in "${(@f)key_listing}"; do
+                    [[ $line = fpr:* ]] || continue
+                    IFS=: read -rA fields <<< "$line"
+                    fingerprint=$fields[10]
+                    [[ -n $fingerprint ]] && available_fingerprints[${(U)fingerprint}]=1
+                done
+            done
+
+            count=$(printf '%s' "$payload" | jq -er '(.gpg.trust // []) | length') ||
+                abend 'unable to count GPG fingerprints'
+            if (( count )); then
+                key_listing=$(
+                    GNUPGHOME=/etc/barnyard/gnupg \
+                        gpg --batch --with-colons --fingerprint --list-keys
+                ) || abend 'unable to inspect the Barnyard GPG keyring'
+                for line in "${(@f)key_listing}"; do
+                    [[ $line = fpr:* ]] || continue
+                    IFS=: read -rA fields <<< "$line"
+                    fingerprint=$fields[10]
+                    [[ -n $fingerprint ]] && available_fingerprints[${(U)fingerprint}]=1
+                done
+
+                for (( index = 0; index < count; index++ )); do
+                    fingerprint=$(printf '%s' "$payload" |
+                        jq -er --argjson index $index '.gpg.trust[$index]') ||
+                            abend 'unable to read GPG fingerprint %d' $(( index + 1 ))
+                    [[ -v available_fingerprints[${(U)fingerprint}] ]] ||
+                        abend 'GPG fingerprint is not present: %s' "$fingerprint"
+                done
+            fi
+        } always {
+            [[ -n $preflight && -d $preflight ]] && rm -rf "$preflight"
+        }
+    fi
+
+    typeset o_file=- o_fingerprint o_repository
+    if printf '%s' "$payload" |
+        jq -e 'has("ssh") and (.ssh | has("allowed_signers"))' > /dev/null
+    then
+        printf '%s' "$payload" | jq -jr '.ssh.allowed_signers' |
+            exemplar :barnyard:ssh:allowed-signers ||
+                abend 'unable to install SSH allowed signers'
+    fi
+    if printf '%s' "$payload" |
+        jq -e 'has("ssh") and (.ssh | has("known_hosts"))' > /dev/null
+    then
+        printf '%s' "$payload" | jq -jr '.ssh.known_hosts' |
+            exemplar :barnyard:ssh:known-hosts ||
+                abend 'unable to install SSH known hosts'
+    fi
+    if printf '%s' "$payload" |
+        jq -e 'has("ssh") and (.ssh | has("private_key"))' > /dev/null
+    then
+        printf '%s' "$payload" | jq -jr '.ssh.private_key' |
+            exemplar :barnyard:ssh:private-key ||
+                abend 'unable to install the SSH private key'
+    fi
+
+    count=$(printf '%s' "$payload" | jq -er '(.gpg.import // []) | length') ||
+        abend 'unable to count GPG public keys'
+    for (( index = 0; index < count; index++ )); do
+        printf '%s' "$payload" | jq -jr --argjson index $index '.gpg.import[$index]' |
+            exemplar :barnyard:gpg:import ||
+                abend 'unable to import GPG public key %d' $(( index + 1 ))
+    done
+
+    count=$(printf '%s' "$payload" | jq -er '(.gpg.trust // []) | length') ||
+        abend 'unable to count GPG fingerprints'
+    for (( index = 0; index < count; index++ )); do
+        o_fingerprint=$(printf '%s' "$payload" |
+            jq -er --argjson index $index '.gpg.trust[$index]') ||
+                abend 'unable to read GPG fingerprint %d' $(( index + 1 ))
+        exemplar :barnyard:gpg:trust ||
+            abend 'unable to trust GPG fingerprint %s' "$o_fingerprint"
+    done
+
+    typeset repository branch
+    typeset hostname
+    hostname=$(:barnyard:hostname) || abend 'unable to determine the hostname'
+    typeset -a log_fields=( status=success operation=bootstrap hostname=$hostname )
+    if printf '%s' "$payload" | jq -e 'has("repository")' > /dev/null; then
+        repository=$(printf '%s' "$payload" | jq -er '.repository.url') ||
+            abend 'unable to read the repository URL'
+        branch=$(printf '%s' "$payload" | jq -er '.repository.branch') ||
+            abend 'unable to read the repository branch'
+        o_repository=$repository#$branch
+        exemplar :barnyard:clone || abend 'unable to clone the configuration repository'
+        log_fields+=( repository=$repository branch=$branch )
+    fi
+    log "${(@)log_fields}"
+}
+
+function :help:agent:prepare {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Prepare the local machine for Barnyard.
+        # opt help
+        Display help for \`barnyard agent prepare\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent prepare\` contains the machine-local preparation steps
+        that run after the Barnyard executable and its base dependencies are in
+        place.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following prepare targets are available.
+        > commands
+    EOF
+}
+
+function :args:agent:prepare {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent:prepare {
+    delegate "$@"
+}
+
+function :help:agent:prepare:ubuntu {
+    heredoc -v help -q <<'    EOF'
+        # desc -- prepare the local Ubuntu agent
+        Prepare the local Ubuntu machine for Barnyard.
+        # opt help
+        Display help for \`barnyard agent prepare ubuntu\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent prepare ubuntu\` runs on the Ubuntu machine itself. It
+        verifies the installed tools, creates \`/etc/barnyard\`, creates the
+        machine age key if one does not already exist, records the public age
+        key for commit back to the control side, and prepares the Barnyard GPG
+        home and machine key.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard agent\` for the machine side of Barnyard.
+
+        \`barnyard control prepare ubuntu\` for the operator command that invokes
+        this command during bootstrap.
+    EOF
+}
+
+function :args:agent:prepare:ubuntu {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent:prepare:ubuntu {
+    exemplar :barnyard:prepare:ubuntu
+}
+
+function :barnyard:prepare:ubuntu {
+    setopt localoptions pipefail
+    typeset tmp; tmp=$(mktemp -d)
+    {
+        pushd $tmp
+        block 'git'
+        {
+            (){ git --version }
+        } always {
+            caught
+        } > >(indent)
+        block 'age'
+        {
+            (){ mkdir -p /etc/barnyard }
+            (){ age --version }
+            (){ age-keygen --version }
+            (){
+                [[ -e /etc/barnyard/age ]] || age-keygen -o /etc/barnyard/age
+            }
+            (){ mkdir -p /var/lib/barnyard/commit/age }
+            (){
+                % $(</etc/hostname)
+                age-keygen -y /etc/barnyard/age |
+                    tee /var/lib/barnyard/commit/age/%q
+            }
+        } always {
+            caught
+        } > >(indent)
+        block 'gpg'
+        {
+            (){ gpg --version }
+            (){ export GNUPGHOME=/etc/barnyard/gnupg }
+            (){ print $GNUPGHOME }
+            (){ ( umask 077 && mkdir -p /etc/barnyard/gnupg ) }
+            (){
+                { cat > key_details; }
+            } % $(</etc/hostname) $(</etc/hostname) <<'            EOF'
+                %%echo Generating a basic OpenPGP key
+                Key-Type: RSA
+                Key-Length: 2048
+                Subkey-Type: RSA
+                Subkey-Length: 2048
+                Name-Real: %s
+                Name-Comment: Root Personal Key
+                Name-Email: user@%s
+                Expire-Date: 0
+                %%no-ask-passphrase
+                %%no-protection
+                # Do a commit here, so that we can later print "done" :-)
+                %%commit
+                %%echo done
+            EOF
+            (){
+                % $(</etc/hostname)
+                gpg --list-keys %q || gpg --verbose --batch --gen-key key_details
+            }
+            (){ gpg --list-keys }
+        } always {
+            caught
+        } > >(indent)
+    } always {
+        popd
+        [[ -d $tmp ]] && rm -rf $tmp
+    }
+}
+
+# We could transfer this age encrypted, but we assume it is coming from
+# `barnyard control` over SSH or from a file on the filesystem of the operator
+# machine.
+
+function :args:ssh:known-hosts {
+    eval "$(args v,version f,file -bx h,help -- "$@")"
+}
+
+function :execute:ssh:known-hosts {
+    barnyard_version_check
+    [[ -v o_file ]] || abend 'a "known_hosts" file is required'
+    exemplar :barnyard:ssh:known-hosts
+}
+
+function :barnyard:ssh:known-hosts {
+    typeset known_hosts
+    block 'set SSH known hosts'
+    {
+        (){ (( $EUID == 0 )) }
+        if [[ $o_file = - ]]; then
+            show eval 'known_hosts=$(cat)'
+        else
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; known_hosts=$(<%q) }
+        fi
+        (){ printf '%s\n' $known_hosts > /etc/barnyard/known_hosts }
+        (){ cat /etc/barnyard/known_hosts }
+    } always {
+        caught
+    } > >(indent)
+}
+
+function :barnyard:ssh:allowed-signers {
+    typeset allowed_signers
+    block 'set SSH allowed signers'
+    {
+        (){ (( $EUID == 0 )) }
+        if [[ $o_file = - ]]; then
+            show eval 'allowed_signers=$(cat)'
+        else
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; allowed_signers=$(<%q) }
+        fi
+        (){ printf '%s\n' $allowed_signers > /etc/barnyard/allowed_signers }
+        (){ cat /etc/barnyard/allowed_signers }
+    } always {
+        caught
+    } > >(indent)
+}
+
+function :args:ssh:private-key {
+    eval "$(args v,version f,file -bx h,help -- "$@")"
+}
+
+function :execute:ssh:private-key {
+    barnyard_version_check
+    [[ -v o_file ]] || abend 'key file is required'
+    exemplar :barnyard:ssh:private-key
+}
+
+function :barnyard:ssh:private-key {
+    typeset key
+    block 'set private SSH key'
+    {
+        (){ (( $EUID == 0 )) }
+        if [[ $o_file = - ]]; then
+            try show eval 'key=$(cat)' || tried
+        else
+            (){ % $o_file; [[ -e %q ]] }
+            (){ % $o_file; key=$(<%q) }
+        fi
+        (){ rm -f /etc/barnyard/id_barnyard }
+        (){ wc <<< $key }
+        (){ (umask 077 && print -- $key > /etc/barnyard/id_barnyard) }
+        (){ ssh-keygen -lf /etc/barnyard/id_barnyard }
+    } always {
+        caught
+    } > >(indent)
+}
+
+function :args:ssh {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:ssh {
+    delegate "$@"
+}
+
+
+return
+___ control_prepare_ubuntu ___
+echo bootstrap
+echo
+{
+    echo '$ export DEBIAN_FRONTEND=noninteractive'
+    export DEBIAN_FRONTEND=noninteractive
+    echo '$ apt-get update && apt-get install -y zsh gnupg2 git age rsync jo jq'
+    apt-get update && apt-get install -y zsh gnupg2 git age rsync jo jq
+    echo '$ mkdir -p /var/lib/barnyard'
+    mkdir -p /var/lib/barnyard
+    echo '$ rm -rf /var/lib/barnyard/zshctl'
+    rm -rf /var/lib/barnyard/zshctl
+    echo '$ git -C /var/lib/barnyard clone --branch main https://github.com/flatheadmill/zshctl.git'
+    git -C /var/lib/barnyard clone --branch main https://github.com/flatheadmill/zshctl.git
+    echo '$ rsync -av --delete /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/'
+    rsync -av --delete /var/lib/barnyard/zshctl/share/zshctl/ /usr/share/zshctl/
+    echo '$ install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/'
+    install -m 755 /var/lib/barnyard/zshctl/bin/zshctl /usr/bin/
+    echo '$ zshctl version'
+    zshctl version
+    echo '$ echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard'
+    echo "$BARNYARD_SOURCE" > /usr/local/bin/barnyard
+    echo '$ chmod 755 /usr/local/bin/barnyard'
+    chmod 755 /usr/local/bin/barnyard
+    echo '$ barnyard version'
+    barnyard version
+} 2>&1 | sed -u 's/^/    /'
+echo
+barnyard agent prepare ubuntu
+___
+
+# vim: ft=zsh :
