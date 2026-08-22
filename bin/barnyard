@@ -893,6 +893,74 @@ function :execute:control {
     delegate "$@"
 }
 
+function :help:control:configure {
+    heredoc -v help -q <<'    EOF'
+        # desc -- create machine resources
+        Configure machine resources from the operator commands.
+        # opt exclude -- < pattern >
+        Exclude hostnames matching the Zsh pattern.
+        # opt force
+        Replace resources that already exist.
+        # opt include -- < pattern >
+        Include only hostnames matching the Zsh pattern.
+        # opt help
+        Display help for \`barnyard control configure\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control configure\` runs the control-side \`configure\`
+        command supplied by each configured operator. Commands read the
+        machine's generated JSON and write resources encrypted to its age
+        recipient.
+
+        Run this command from the configuration worktree. Operator commands
+        are loaded from the adjacent \`../code/barnyard\` working tree.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard control generate\` compiles the machine manifests.
+    EOF
+}
+
+function :args:control:configure {
+    typeset o_include='*'
+    eval "$(args -@ -d i,include e,exclude -b f,force -bx h,help -- "$@")"
+}
+
+function :execute:control:configure {
+    typeset extension=${PWD:A:h}/code/barnyard
+    [[ -d age && -d machines && -d resources &&
+        -r $extension/barnyard.extension.zsh ]] ||
+        abend 'barnyard control configure must run from a configuration worktree'
+
+    typeset machine configuration name implementation
+    typeset -a command arguments
+    for machine in age/*(N); do
+        machine=${machine:t}
+        [[ $machine = $~o_include ]] || continue
+        [[ -z ${o_exclude:-} || $machine != $~o_exclude ]] || continue
+        for configuration in machines/$machine/*.json(N); do
+            name=${configuration:t:r}
+            [[ $name = machine || $name = order ]] && continue
+            implementation=$(jq -r --arg default "barnyard.$name" \
+                '._operator // $default' "$configuration")
+            command=( "${(@s:.:)${implementation#barnyard.}}" configure )
+            [[ -r "$extension/commands/${(j:/:)command}/command.zsh" ]] ||
+                continue
+
+            print -r -- "$configuration"
+            arguments=()
+            (( o_force )) && arguments+=( --force )
+            BARNYARD_CONFIGURATION="${configuration:A}" \
+            BARNYARD_EXTENSION="$extension" \
+            BARNYARD_HOSTNAME="$machine" \
+            BARNYARD_OPERATOR="$name" \
+            BARNYARD_OPERATION=configure \
+                "$BARNYARD_PATH/barnyard" "${command[@]}" "${arguments[@]}" ||
+                    return 1
+        done
+    done
+}
+
 function :help:control:generate {
     heredoc -v help -q <<'    EOF'
         # desc -- compile machine manifests
