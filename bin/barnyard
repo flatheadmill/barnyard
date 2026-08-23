@@ -15,7 +15,7 @@ zshctl[man_title]='Barnyard Manuals'
 
 # Now I want the ability to export the barnyard functions.
 #
-# This means `barnyard apply`, `barnyard funcs`, `barnyard whever`.
+# This means `barnyard agent apply`, `barnyard funcs`, `barnyard whever`.
 #
 # But we don't want to get into serious argument parsing, do we?
 
@@ -546,7 +546,7 @@ function :barnyard:apply {
     }
 }
 
-function :help:always {
+function :help:agent:always {
     heredoc -v help -q <<'    EOF'
         # desc -- force operators to converge
         Run the named operators regardless of their applied state.
@@ -561,10 +561,10 @@ function :help:always {
         # opt check-signature
         Verify the selected commits before extracting them.
         # opt help
-        Display help for \`barnyard always\`.
+        Display help for \`barnyard agent always\`.
         # man
         ## DESCRIPTION
-        \`barnyard always\` converges the named operators even when their applied
+        \`barnyard agent always\` converges the named operators even when their applied
         markers say they have already run.
 
         Apply operations are serialized across the machine. If another
@@ -575,13 +575,13 @@ function :help:always {
     EOF
 }
 
-function :args:always {
+function :args:agent:always {
     typeset o_repository=/var/lib/barnyard/repository
     integer o_check_signature=1
     eval "$(args -@ v,version -d r,repository -b q,quiet f,fetch -d! c,check-signature -bx h,help -- "$@")"
 }
 
-function :execute:always {
+function :execute:agent:always {
     typeset -A o_barnyard=(
         always yes
         operation always
@@ -592,7 +592,7 @@ function :execute:always {
     :barnyard:apply "$@"
 }
 
-function :help:apply {
+function :help:agent:apply {
     heredoc -v help -q <<'    EOF'
         # desc -- converge the machine
         Converge the machine from its generated configuration.
@@ -611,10 +611,10 @@ function :help:apply {
         # opt check-signature
         Verify the selected commits before extracting them.
         # opt help
-        Display help for \`barnyard apply\`.
+        Display help for \`barnyard agent apply\`.
         # man
         ## DESCRIPTION
-        \`barnyard apply\` reads the generated machine configuration and
+        \`barnyard agent apply\` reads the generated machine configuration and
         converges its operators in the recorded order.
 
         Apply operations are serialized across the machine. If another
@@ -625,16 +625,16 @@ function :help:apply {
     EOF
 }
 
-function :args:apply {
+function :args:agent:apply {
     typeset o_repository=/var/lib/barnyard/repository
     integer o_check_signature=1
     integer o_limit=$(( 16#7fffffffffffffff ))
     eval "$(args -@ -d l,limit v,version R,ref -d r,repository -b d,dry-run q,quiet -d! c,check-signature -bx h,help -- "$@")"
 }
 
-function :execute:apply {
+function :execute:agent:apply {
     [[ -v o_ref && $o_dry_run = 0 ]] && abend 'cannot specify ref except for dry-run'
-    (( $# )) && abend 'barnyard apply takes no positional arguments'
+    (( $# )) && abend 'barnyard agent apply takes no positional arguments'
     typeset -A o_barnyard=(
         always no
         operation apply
