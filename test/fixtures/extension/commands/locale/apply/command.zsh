@@ -10,16 +10,7 @@ function :execute:locale:apply {
     function localize {
         typeset language
         () {
-            language=$(jq -er '
-                if type != "object" then
-                    error("locale configuration is not an object")
-                elif has("language") and (.language | type) != "string" then
-                    error("invalid locale language")
-                else
-                    .language // "en_US.UTF-8"
-                end
-            ' "${BARNYARD_CONFIGURATION:-}") ||
-                abend 'invalid locale configuration %s' "${BARNYARD_CONFIGURATION:-}"
+            language=$(jq -r '.language // "en_US.UTF-8"' "$BARNYARD_CONFIGURATION")
         }
         () { print $language }
         () { update-locale --reset LANG=$language }
