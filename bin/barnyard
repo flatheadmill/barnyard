@@ -592,6 +592,57 @@ function :execute:agent:always {
     :barnyard:apply "$@"
 }
 
+function :help:agent:service {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Run configured operators for services and timers.
+        # opt version -- < version >
+        Require this Barnyard version on the machine.
+        # opt repository -- < repository >
+        Read Barnyard configuration and code from this repository.
+        # opt quiet
+        Suppress ordinary output.
+        # opt fetch
+        Fetch the repository before running the operators.
+        # opt check-signature
+        Verify the selected commits before extracting them.
+        # opt help
+        Display help for \`barnyard agent service\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent service <operator/operation> ...\` runs configured
+        operations such as \`wg1/daemon\` or \`peers1/run\` for systemd.
+        It uses the same configuration and code preparation as
+        \`barnyard agent always\`, running regardless of applied state.
+
+        The command leaves the machine-wide apply lock free and does not
+        write applied markers. Operations retain their own locks. Each
+        invocation reads the local repository and keeps its extracted
+        configuration and code until the operations exit. Use \`--fetch\`
+        to update the repository first.
+        ## OPTIONS
+        > options
+    EOF
+}
+
+function :args:agent:service {
+    typeset o_repository=/var/lib/barnyard/repository
+    integer o_check_signature=1
+    eval "$(args -@ v,version -d r,repository -b q,quiet f,fetch -d! c,check-signature -bx h,help -- "$@")"
+}
+
+function :execute:agent:service {
+    (( $# )) || abend 'service requires an operator to run'
+    typeset -A o_barnyard=(
+        always yes
+        operation service
+        repository ${o_repository:A}
+        fetch $o_fetch
+        limit $(( 16#7fffffffffffffff ))
+    )
+    :barnyard:apply:body "$@"
+}
+
 function :help:agent:apply {
     heredoc -v help -q <<'    EOF'
         # desc -- converge the machine
