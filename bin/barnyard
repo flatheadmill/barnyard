@@ -373,6 +373,7 @@ function :barnyard:run {
 
     command=( "${(@s:.:)${implementation#barnyard.}}" "$operation" )
     if BARNYARD_ARCHIVE="$barnyard[archive]" \
+        BARNYARD_ALWAYS="$o_barnyard[always]" \
         BARNYARD_CONFIGURATION="$barnyard[configuration]" \
         BARNYARD_EXTENSION="$extension" \
         BARNYARD_HOSTNAME="$barnyard[hostname]" \
