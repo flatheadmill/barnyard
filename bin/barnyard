@@ -447,7 +447,6 @@ function :barnyard:order:operators {
 
 function :barnyard:apply:body {
     typeset operator
-    umask 077
     export BARNYARD_TEMP
     BARNYARD_TEMP=$(mktemp -d) || abend 'unable to create temporary directory'
     {
