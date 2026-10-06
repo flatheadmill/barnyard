@@ -52,6 +52,10 @@ function line_count {
     print $count
 }
 
+function file_mode {
+    stat -f %Lp "$1" 2> /dev/null || stat -c %a "$1"
+}
+
 function probe_receiver {
     setopt local_options no_err_exit
     typeset payload=$1 mode=${2:-success}
@@ -128,6 +132,7 @@ function run_real_receiver {
                 functions[$name]=$body
             done
 
+            umask 022
             :barnyard:agent:bootstrap
         ' 2>&1
     typeset receiver_status=$pipestatus[2]
@@ -399,6 +404,12 @@ EOF
         "$(<$tmp/root/etc/barnyard/allowed_signers)" "$(<$allowed_signers)"
     assert 'known_hosts is installed' "$(<$tmp/root/etc/barnyard/known_hosts)" "$(<$known)"
     assert 'private key is installed' "$(<$tmp/root/etc/barnyard/id_barnyard)" "$(<$private_key)"
+    assert 'allowed signers remain public trust material' \
+        "$(file_mode $tmp/root/etc/barnyard/allowed_signers)" 644
+    assert 'known hosts remain public trust material' \
+        "$(file_mode $tmp/root/etc/barnyard/known_hosts)" 644
+    assert 'private key remains private' \
+        "$(file_mode $tmp/root/etc/barnyard/id_barnyard)" 600
     assert 'two real GPG imports run' "${$(wc -l < $tmp/gpg-imports)// /}" 2
     assert 'two real GPG trusts run' "${$(wc -l < $tmp/gpg-trusts)// /}" 2
     assert 'first trust gets its fingerprint' "$(sed -n '1p' $tmp/gpg-trusts)" \
