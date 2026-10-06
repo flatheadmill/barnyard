@@ -1632,7 +1632,6 @@ function :barnyard:hostname {
 
 function :barnyard:agent:bootstrap {
     setopt localoptions pipefail
-    umask 077
 
     typeset payload
     payload=$(cat) || abend 'unable to read the bootstrap payload'
