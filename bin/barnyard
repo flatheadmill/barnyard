@@ -697,88 +697,101 @@ function :execute:agent:apply {
     :barnyard:apply "$@"
 }
 
-# TODO Hard won and it works.
-function barnyard_systemd {
-    # We're going to only be interested in log entries emitted after we start
-    # our unit, so we capture the journal cursor now.
-    [[ "$(journalctl -q -e -n 1 -o verbose)" =~ ^.*\\[(.*)\\] ]]
-    typeset cursor=$match[1]
-
-    # Tail the barnyard logs from this point if we successfully start the unit.
-    typeset since="$(date --iso-8601=seconds | sed -e 's/T/ /' -e 's/\+.*//')"
-
-    # Attempt to start the unit. The `--collect` argument will delete the
-    # transient unit regardless of exit status. We set an environment variable
-    # that we'll use to assert that the running unit is the unit we ran.
-    systemd-run --setenv BARNYARD_PID=$$ --collect --unit barnyard $BARNYARD_PATH/barnyard "$@" || exit 1
-
-    # Grap a snapshot of the properties of the currently running unit.
-    typeset line
-    typeset -A properties
-    typeset -a split
-    while read -r line; do
-        split=( "${(@s:=:)line}" )
-        properties[$split[1]]="$split[2]"
-    done < <(systemctl show --property MainPID --property InvocationID barnyard)
-
-    # Check that there is a barnyard unit running.
-    (( $properties[MainPID] )) || abend 'barnyard exited awfully quick'
-
-    # Assert that we are the ones who ran it.
-    # https://askubuntu.com/questions/978711/how-do-i-split-a-proc-environ-file-in-separate-lines
-    [[ $(xargs -0 -L1 -a "/proc/${properties[MainPID]}/environ" | awk -v pid=$$ -F= '$1 == "BARNYARD_PID" && $2 == pid { print "true" }') = true ]] || \
-        abend 'someone else started this barnyard unit'
-
-    # Start tailing the unit.
-    journalctl --quiet --cursor "$cursor" --no-hostname --no-pager -fe --unit barnyard &
-    typeset jctl=$!
-    trap "kill $jctl" EXIT
-
-    # Here we block. We tail `journalctl` until we see an exit message, either
-    # success or failure. It will be a single line so we pipe to head to get the
-    # line. When head exits this pipeline exits. Likely the user will have seen
-    # the final messages on in their terminal as well.
-    journalctl --quiet --cursor "$cursor" --follow --unit barnyard \
-        INVOCATION_ID=$properties[InvocationID] \
-        MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
-        MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15 | \
-    head -n 1 > /dev/null
-
-    # We get the exit message again, this time to determine the exit code.
-    typeset -A outcome
-    while read -r line; do
-        [[ "$line" =~ ^([^=]+)=(.*)$ ]] || continue
-        outcome[$match[1]]=$match[2]
-    done < <(
-        journalctl --quiet --cursor "$cursor" --unit barnyard --output export --output-fields EXIT_STATUS,MESSAGE,MESSAGE_ID \
-            INVOCATION_ID=$properties[InvocationID] \
-            MESSAGE_ID=7ad2d189f7e94e70a38c781354912448 \
-            MESSAGE_ID=98e322203f7a4ed290d09fe03c09fe15
-    )
-
-    # If it was an error message, return the error exit code.
-    # TODO `return` is unnecessary, isn't it?
-    [[ $outcome[MESSAGE_ID] = 98e322203f7a4ed290d09fe03c09fe15 ]] && return $outcome[EXIT_STATUS]
+function :barnyard:systemd {
+    systemd-run --quiet --wait --pipe --collect \
+        --property=Type=exec --unit=barnyard \
+        "$BARNYARD_PATH/barnyard" "$@"
 }
 
-# TODO This should be a flag... --systemd.
-function command_barnyard_systemd_always {
-    eval "$(barnyard_parse_arguments systemd_always v,version: h,help -- "$@")"
+function :help:agent:systemd {
+    heredoc -v help -q <<'    EOF'
+        # desc
+        Run Barnyard convergence in a transient systemd unit.
+        # opt help
+        Display help for \`barnyard agent systemd\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent systemd\` runs an apply or always pass in the
+        transient \`barnyard.service\` unit. Output remains attached to the
+        caller, the process status is returned unchanged, and the completed
+        unit is collected while its journal remains available.
+        ## OPTIONS
+        > options
+        ## COMMANDS
+        The following commands are available under \`barnyard agent systemd\`.
+        > commands
+    EOF
+}
+
+function :args:agent:systemd {
+    eval "$(args -bx h,help -- "$@")"
+}
+
+function :execute:agent:systemd {
+    delegate "$@"
+}
+
+function :help:agent:systemd:apply {
+    heredoc -v help -q <<'    EOF'
+        # desc -- converge through systemd
+        Run an apply pass in a transient systemd unit.
+        # opt version -- < version >
+        Require this Barnyard version on the machine.
+        # opt dry-run
+        Report the operators that would run without running them.
+        # opt help
+        Display help for \`barnyard agent systemd apply\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent systemd apply\` starts \`barnyard agent apply\` in
+        \`barnyard.service\`, streams its output, waits for completion, and
+        returns the apply process status.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard agent apply\` runs the same pass in the calling process.
+    EOF
+}
+
+function :args:agent:systemd:apply {
+    eval "$(args -b d,dry-run -s v,version -bx h,help -- "$@")"
+}
+
+function :execute:agent:systemd:apply {
+    (( $# )) && abend 'barnyard agent systemd apply takes no positional arguments'
     barnyard_version_check
-    barnyard_systemd always "$@"
+    typeset -a arguments=( agent apply )
+    (( o_dry_run )) && arguments+=( --dry-run )
+    :barnyard:systemd "${arguments[@]}"
 }
 
-function command_barnyard_systemd_apply {
-    eval "$(barnyard_parse_arguments systemd_apply d,dry-run v,version: h,help -- "$@")"
+function :help:agent:systemd:always {
+    heredoc -v help -q <<'    EOF'
+        # desc -- force convergence through systemd
+        Run an always pass in a transient systemd unit.
+        # opt version -- < version >
+        Require this Barnyard version on the machine.
+        # opt help
+        Display help for \`barnyard agent systemd always\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard agent systemd always\` starts \`barnyard agent always\` in
+        \`barnyard.service\`, streams its output, waits for completion, and
+        returns the process status.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard agent always\` runs the same pass in the calling process.
+    EOF
+}
+
+function :args:agent:systemd:always {
+    eval "$(args -@ -s v,version -bx h,help -- "$@")"
+}
+
+function :execute:agent:systemd:always {
     barnyard_version_check
-    typeset -a dry_run
-    (( $o_dry_run )) && dry_run+=( '--dry-run' )
-    barnyard_systemd apply "${(@)dry_run}" "$@"
-}
-
-function command_barnyard_systemd {
-    eval "$(barnyard_parse_arguments systemd v,version: h,help -- "$@")"
-    barnyard_next_command barnyard_systemd "$@"
+    :barnyard:systemd agent always "$@"
 }
 
 # Could argue that the repository should never change, but it comes from outside
@@ -1384,6 +1397,63 @@ function :execute:control:generate {
         ( :barnyard:control:generate "$o_include" "${o_exclude:-}" "$configuration" ) ||
             return 1
     done
+}
+
+function :help:control:inventory {
+    heredoc -v help -q <<'    EOF'
+        # desc -- list selected machines
+        List the machines selected by one or more manifests.
+        # opt exclude -- < pattern >
+        Exclude hostnames matching the Zsh pattern.
+        # opt include -- < pattern >
+        Include only hostnames matching the Zsh pattern.
+        # opt help
+        Display help for \`barnyard control inventory\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control inventory\` compiles the manifests in an isolated
+        temporary configuration tree and prints one selected hostname per line.
+        It therefore uses the same manifest language, selection rules, and
+        disabled-machine handling as \`barnyard control generate\` without
+        changing the caller's configuration tree.
+        ## OPTIONS
+        > options
+        ## SEE ALSO
+        \`barnyard control generate\` compiles the selected machines into the
+        current configuration tree.
+    EOF
+}
+
+function :args:control:inventory {
+    typeset o_include='*'
+    eval "$(args -@ -d i,include e,exclude -bx h,help -- "$@")"
+}
+
+function :execute:control:inventory {
+    (( $# )) || abend 'at least one machines.zsh manifest is required'
+
+    typeset tmp configuration
+    tmp=$(mktemp -d) || abend 'unable to create temporary inventory directory'
+    {
+        mkdir -p "$tmp"/{age,machines,resources} ||
+            abend 'unable to initialize temporary inventory directory'
+        for configuration in "$@"; do
+            [[ ${configuration:e} = zsh ]] || continue
+            [[ -r $configuration ]] || abend 'manifest is not readable: %s' "$configuration"
+            configuration=${configuration:A}
+            (
+                cd "$tmp" || return 1
+                :barnyard:control:generate "$o_include" "${o_exclude:-}" "$configuration"
+            ) > /dev/null || return 1
+        done
+
+        typeset machine
+        for machine in "$tmp"/machines/*(N/); do
+            print -r -- "${machine:t}"
+        done
+    } always {
+        [[ -d $tmp ]] && rm -rf "$tmp"
+    }
 }
 
 function :barnyard:control:send {
