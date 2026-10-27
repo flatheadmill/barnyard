@@ -10,14 +10,14 @@ This README is also where Barnyard's decisions are written down and kept. A deci
 
 Dependencies on a prepared machine: `zsh`, `gnupg2` (gpg), `git`, `age`, `rsync`, and — for JSON configuration — `jo` and `jq`. Ubuntu is what we run; another distribution is only the package step, so `barnyard control prepare fedora` installs the same set with `dnf` and copies the same one file. The binary does not change; only the package manager does.
 
-To deploy a new Barnyard, copy the local file up. There is no upgrade dance and no version negotiation between a client and a server — the file you built is the file the machine runs.
+To deploy a new Barnyard, run `barnyard control refresh --destination <ssh-destination>`. It copies the current executable, checks it through the machine's installed zshctl, and atomically replaces `/usr/local/bin/barnyard`, including when the version is unchanged. Prepare remains responsible for zshctl and dependencies.
 
 ## Commands
 
 - `barnyard version` — the version.
 - `barnyard completions` — shell completions.
 - `barnyard extend` — the zshctl extension mechanism.
-- `barnyard control <cmd>` — the operator side: `prepare`, `bootstrap`, `commit`, `configure`, `generate`.
+- `barnyard control <cmd>` — the operator side: `prepare`, `refresh`, `bootstrap`, `commit`, `configure`, `generate`.
 - `barnyard agent <cmd>` — the machine side: `clone`, `commit`, `gpg`, `prepare`, `ssh`, `apply`, `always`. `apply` and `always` are run by hand on the box; the rest are reached in by `control` over SSH.
 - `barnyard <operator> <...>` — a user operator. Any top-level word that is not one of the five reserved above.
 

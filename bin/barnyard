@@ -1545,6 +1545,50 @@ function :execute:control:bootstrap {
             abend 'unable to bootstrap %s' "$o_destination"
 }
 
+function :help:control:refresh {
+    heredoc -v help -q <<'    EOF'
+        # desc -- replace the executable on a prepared machine
+        Copy this Barnyard executable to a prepared machine.
+        # opt destination -- < ssh destination >
+        # opt help
+        Display help for \`barnyard control refresh\`.
+        # man
+        ## DESCRIPTION
+        \`barnyard control refresh\` sends the current Barnyard file over
+        strictly verified SSH using \`sudo -n\`. The machine's installed
+        zshctl must run the candidate and report this controller's version
+        before the candidate replaces \`/usr/local/bin/barnyard\` atomically.
+
+        Refresh replaces the file even when the installed version is equal.
+        It updates only Barnyard; \`control prepare\` owns installation of
+        zshctl and the machine's dependencies.
+        ## OPTIONS
+        > options
+    EOF
+}
+
+function :args:control:refresh {
+    eval "$(args -d d,destination -bx h,help -- "$@")"
+}
+
+function :execute:control:refresh {
+    setopt localoptions pipefail
+    [[ -n ${o_destination:-} ]] || abend 'an SSH destination is required'
+    (( $# )) && abend 'barnyard control refresh takes no positional arguments'
+
+    typeset source=${${(%):-%x}:A} refresh
+    refresh=$(resource control_refresh "$source")
+    [[ -n $refresh ]] || abend 'refresh resource is missing from %s' "$source"
+
+    {
+        barnyard_source
+        printf 'BARNYARD_EXPECTED_VERSION=%q\n' "$BARNYARD_VERSION"
+        print -r -- "$refresh"
+    } | ssh -o ConnectTimeout=30 -o ConnectionAttempts=1 \
+        -o StrictHostKeyChecking=yes -- "$o_destination" \
+        '/usr/bin/sudo -n /bin/bash' || abend 'unable to refresh %s' "$o_destination"
+}
+
 function :args:control:prepare {
     eval "$(args -bx h,help -- "$@")"
 }
@@ -2068,6 +2112,28 @@ function :execute:ssh {
 
 
 return
+___ control_refresh ___
+[[ -f /usr/local/bin/barnyard && -x /usr/local/bin/barnyard ]] || {
+    printf '%s\n' 'Barnyard is not installed; prepare the machine first' >&2
+    exit 1
+}
+[[ -f /usr/bin/zshctl && -x /usr/bin/zshctl ]] || {
+    printf '%s\n' 'zshctl is not installed; prepare the machine first' >&2
+    exit 1
+}
+
+stage=$(mktemp -d /usr/local/bin/.barnyard.XXXXXX)
+trap 'result=$?; rm -rf -- "$stage" || :; exit "$result"' EXIT
+printf '%s\n' "$BARNYARD_SOURCE" > "$stage/barnyard"
+chown root:root "$stage/barnyard"
+chmod 0755 "$stage/barnyard"
+actual=$(/usr/bin/zshctl "$stage/barnyard" version)
+[[ $actual = "$BARNYARD_EXPECTED_VERSION" ]] || {
+    printf 'candidate version is %s, expected %s\n' "$actual" "$BARNYARD_EXPECTED_VERSION" >&2
+    exit 1
+}
+
+mv -T -- "$stage/barnyard" /usr/local/bin/barnyard
 ___ control_prepare_ubuntu ___
 echo bootstrap
 echo
