@@ -477,7 +477,7 @@ function :barnyard:apply:body {
             o_barnyard[sha1]=$(git -C ${o_barnyard[repository]} rev-parse $o_barnyard[branch])
 
             o_barnyard[archive]=$BARNYARD_TEMP/run
-            barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf
+            barnyard_extract $o_barnyard[branch] $BARNYARD_TEMP/run/conf || return 1
             o_barnyard[code]=$(jq -er --arg default "$(<$BARNYARD_TEMP/run/conf/code)" '
                 if type != "object" then
                     error("machine configuration is not an object")
@@ -488,7 +488,7 @@ function :barnyard:apply:body {
                 end
             ' "$BARNYARD_TEMP/run/conf/machines/$o_barnyard[hostname]/machine.json") ||
                 abend 'invalid machine configuration for %s' "$o_barnyard[hostname]"
-            barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code
+            barnyard_extract $o_barnyard[code] $BARNYARD_TEMP/run/code || return 1
 
             if (( $# )); then
                 for operator in "$@"; do
